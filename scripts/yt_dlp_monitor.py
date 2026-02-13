@@ -95,7 +95,11 @@ def _parse_option_list(options: list[str]) -> OptionDict:
         opt = options[i]
         if opt.startswith("-"):
             if i + 1 < len(options) and not options[i + 1].startswith("-"):
-                result.setdefault(opt, []).append(options[i + 1])  # type: ignore[union-attr]
+                values = result.get(opt)
+                if values is None:
+                    values = []
+                    result[opt] = values
+                values.append(options[i + 1])
                 i += 2
             else:
                 result[opt] = None
@@ -262,7 +266,8 @@ class AudioNormalizePP(PostProcessor):
             return hint
         origin = get_origin(hint)
         if origin is Literal:
-            return type(get_args(hint)[0])  # type: ignore[no-any-return]
+            first = get_args(hint)[0]
+            return type(first) if isinstance(first, (str, int, float, bool)) else str
         if origin is list:
             return None
         if origin is types.UnionType:
