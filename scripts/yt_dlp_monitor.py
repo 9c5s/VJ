@@ -29,6 +29,7 @@ from typing import (
     ClassVar,
     Final,
     Literal,
+    NamedTuple,
     NoReturn,
     cast,
     get_args,
@@ -47,6 +48,14 @@ from yt_dlp.postprocessor.common import PostProcessor
 from yt_dlp.utils import DownloadError
 
 type OptionDict = dict[str, list[str] | None]
+
+
+class ParsedArgs(NamedTuple):
+    """parse_args()の戻り値"""
+
+    yt_dlp_options: list[str]
+    normalize: bool
+
 
 # 設定
 POLLING_INTERVAL: Final[float] = 0.1
@@ -156,14 +165,19 @@ def merge_yt_dlp_options(overrides: list[str]) -> list[str]:
     return _dict_to_option_list(base)
 
 
-def parse_args() -> list[str]:
-    """コマンドライン引数を解析し、yt-dlpオプションを返す
+def parse_args() -> ParsedArgs:
+    """コマンドライン引数を解析し、yt-dlpオプションと設定を返す
 
     Returns:
-        マージ済みのyt-dlpオプションリスト
+        パース結果を格納したParsedArgs
     """
     parser = argparse.ArgumentParser(
         description="クリップボードを監視し、URLを検知するとyt-dlpでダウンロードする",
+    )
+    parser.add_argument(
+        "--no-normalize",
+        action="store_true",
+        help="ダウンロード後の音量正規化をスキップする",
     )
     parser.add_argument(
         "yt_dlp_args",
@@ -178,8 +192,11 @@ def parse_args() -> list[str]:
         overrides = overrides[1:]
 
     if not overrides:
-        return list(YT_DLP_OPTIONS)
-    return merge_yt_dlp_options(overrides)
+        yt_dlp_options = list(YT_DLP_OPTIONS)
+    else:
+        yt_dlp_options = merge_yt_dlp_options(overrides)
+
+    return ParsedArgs(yt_dlp_options=yt_dlp_options, normalize=not args.no_normalize)
 
 
 def setup_logger() -> logging.Logger:
@@ -371,13 +388,20 @@ class AudioNormalizePP(PostProcessor):
             Path(tmp_path).unlink(missing_ok=True)
 
 
-def download_video(url: str, logger: logging.Logger, yt_dlp_options: list[str]) -> None:
+def download_video(
+    url: str,
+    logger: logging.Logger,
+    yt_dlp_options: list[str],
+    *,
+    normalize: bool = True,
+) -> None:
     """指定されたURLに対してyt-dlpでダウンロードを実行する
 
     Args:
         url: ダウンロード対象のURL
         logger: 状態を出力するためのロガーインスタンス
         yt_dlp_options: yt-dlpに渡すオプションリスト
+        normalize: Trueの場合、ダウンロード後に音量を正規化する
     """
     # マージ済みオプションからダウンロードディレクトリを取得して作成する
     parsed = _parse_option_list(yt_dlp_options)
@@ -395,7 +419,8 @@ def download_video(url: str, logger: logging.Logger, yt_dlp_options: list[str]) 
         logger.info("ダウンロードを開始します: %s", url)
         logger.debug("yt-dlp options: %s", yt_dlp_options)
         with yt_dlp.YoutubeDL(opts) as ydl:
-            ydl.add_post_processor(AudioNormalizePP(), when="after_move")
+            if normalize:
+                ydl.add_post_processor(AudioNormalizePP(), when="after_move")
             ret = ydl.download([url])
         if ret != 0:
             logger.error("ダウンロードがエラーで終了しました (code=%d)", ret)
@@ -405,7 +430,7 @@ def download_video(url: str, logger: logging.Logger, yt_dlp_options: list[str]) 
         logger.exception("ダウンロードに失敗しました")
 
 
-def monitor_clipboard(yt_dlp_options: list[str]) -> NoReturn:
+def monitor_clipboard(yt_dlp_options: list[str], *, normalize: bool = True) -> NoReturn:
     """新しいURLがないかクリップボードを継続的に監視する
 
     定義された間隔でクリップボードの内容を確認する無限ループを実行する
@@ -413,6 +438,7 @@ def monitor_clipboard(yt_dlp_options: list[str]) -> NoReturn:
 
     Args:
         yt_dlp_options: yt-dlpに渡すオプションリスト
+        normalize: Trueの場合、ダウンロード後に音量を正規化する
     """
     logger = setup_logger()
     logger.info("クリップボード監視を開始します")
@@ -437,7 +463,9 @@ def monitor_clipboard(yt_dlp_options: list[str]) -> NoReturn:
                 last_text = current_text
                 if is_valid_url(current_text):
                     logger.info("URLを検知しました: %s", current_text)
-                    download_video(current_text, logger, yt_dlp_options)
+                    download_video(
+                        current_text, logger, yt_dlp_options, normalize=normalize
+                    )
                 else:
                     logger.debug(
                         "クリップボードの変更を検知しましたが、URLではありません"
@@ -451,4 +479,5 @@ def monitor_clipboard(yt_dlp_options: list[str]) -> NoReturn:
 
 
 if __name__ == "__main__":
-    monitor_clipboard(parse_args())
+    parsed = parse_args()
+    monitor_clipboard(parsed.yt_dlp_options, normalize=parsed.normalize)
