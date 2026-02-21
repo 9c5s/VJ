@@ -1,9 +1,9 @@
 # /// script
 # requires-python = ">=3.13"
 # dependencies = [
-#     "ffmpeg-normalize",
 #     "pyperclip",
-#     "yt-dlp",
+#     "yt-dlp>=2026.2.4",
+#     "yt-dlp-audio-normalize",
 # ]
 # ///
 """yt-dlp用クリップボード監視ツール
@@ -14,38 +14,23 @@
 from __future__ import annotations
 
 import argparse
-import functools
 import logging
-import os
-import shutil
 import sys
-import tempfile
 import time
-import types
 from pathlib import Path
 from typing import (
-    TYPE_CHECKING,
-    Any,
-    ClassVar,
     Final,
-    Literal,
     NamedTuple,
     NoReturn,
-    cast,
-    get_args,
-    get_origin,
-    get_type_hints,
 )
 from urllib.parse import urlparse
 
 import pyperclip
 import yt_dlp
-from ffmpeg_normalize import FFmpegNormalize, FFmpegNormalizeError
-
-if TYPE_CHECKING:
-    from yt_dlp.extractor.common import _InfoDict  # pyright: ignore[reportPrivateUsage]
-from yt_dlp.postprocessor.common import PostProcessor
 from yt_dlp.utils import DownloadError
+from yt_dlp_plugins.postprocessor.audio_normalize import (  # pyright: ignore[reportMissingTypeStubs]
+    AudioNormalizePP,
+)
 
 type OptionDict = dict[str, list[str] | None]
 
@@ -227,165 +212,6 @@ def is_valid_url(text: str) -> bool:
         return parsed.scheme in ("http", "https") and bool(parsed.netloc)
     except ValueError:
         return False
-
-
-class AudioNormalizePP(PostProcessor):
-    """ダウンロード後にffmpeg-normalizeで音量を正規化するPostProcessor
-
-    --ppa "AudioNormalize:ARGS" でffmpeg-normalizeのパラメータを上書きできる
-    FFmpegNormalize.__init__の全スカラーパラメータを長形式フラグで自動サポートし、短縮フラグも提供する
-    bool型パラメータは値なしフラグとして指定可能(例: --dual-mono)
-    """
-
-    # 短縮フラグ→パラメータ名のマッピング(自動導出不可能なもののみ)
-    # https://slhck.info/ffmpeg-normalize/usage/cli-options/
-    _SHORT_FLAGS: ClassVar[dict[str, str]] = {
-        # 正規化
-        "-nt": "normalization_type",
-        "-t": "target_level",
-        "-p": "print_stats",
-        # EBU R128
-        "-lrt": "loudness_range_target",
-        "-tp": "true_peak",
-        # 音声エンコード
-        "-c:a": "audio_codec",
-        "-b:a": "audio_bitrate",
-        "-ar": "sample_rate",
-        "-ac": "audio_channels",
-        "-koa": "keep_original_audio",
-        # フィルタ
-        "-prf": "pre_filter",
-        "-pof": "post_filter",
-        # 映像/字幕/メタデータ
-        "-vn": "video_disable",
-        "-c:v": "video_codec",
-        "-sn": "subtitle_disable",
-        "-mn": "metadata_disable",
-        "-cn": "chapters_disable",
-        # 出力形式
-        "-ofmt": "output_format",
-        "-ext": "extension",
-        # 実行制御
-        "-d": "debug",
-        "-n": "dry_run",
-        "-pr": "progress",
-    }
-
-    # アノテーションと実際の使用法が乖離しているパラメータの型オーバーライド
-    _TYPE_OVERRIDES: ClassVar[dict[str, type]] = {
-        "audio_bitrate": str,  # 型注釈はfloatだが実際はstr("192k"等)を受け付ける
-    }
-
-    @staticmethod
-    def _extract_scalar_type(hint: object) -> type | None:
-        """型ヒントからスカラー型を抽出する list型の場合はNoneを返す"""
-        if isinstance(hint, type) and hint in (str, float, int, bool):
-            return hint
-        origin = get_origin(hint)
-        if origin is Literal:
-            first = get_args(hint)[0]
-            return type(first) if isinstance(first, (str, int, float, bool)) else str
-        if origin is list:
-            return None
-        if origin is types.UnionType:
-            for arg in get_args(hint):
-                if arg is not type(None):
-                    return AudioNormalizePP._extract_scalar_type(arg)
-        return str
-
-    @staticmethod
-    @functools.cache
-    def _build_param_map() -> dict[str, tuple[str, type]]:
-        """PPA引数フラグから(パラメータ名, 型)へのマッピングを自動構築する
-
-        __init__の型アノテーションから長形式フラグと型を自動生成し、
-        短縮フラグと型オーバーライドをマージする
-        """
-        hints = get_type_hints(FFmpegNormalize.__init__)
-        param_map: dict[str, tuple[str, type]] = {}
-        for param_name, hint in hints.items():
-            scalar_type = AudioNormalizePP._extract_scalar_type(hint)
-            if scalar_type is None:
-                continue
-            actual_type = AudioNormalizePP._TYPE_OVERRIDES.get(param_name, scalar_type)
-            long_flag = "--" + param_name.replace("_", "-")
-            param_map[long_flag] = (param_name, actual_type)
-        for flag, param_name in AudioNormalizePP._SHORT_FLAGS.items():
-            long_flag = "--" + param_name.replace("_", "-")
-            if long_flag in param_map:
-                param_map[flag] = param_map[long_flag]
-        return param_map
-
-    def run(self, information: _InfoDict) -> tuple[list[str], _InfoDict]:
-        """ダウンロード済みファイルの音量を正規化する"""
-        filepath = information.get("filepath")
-        if filepath:
-            self._normalize_file(filepath)
-        return [], information
-
-    def _build_normalize_kwargs(self) -> dict[str, Any]:
-        """PPAの引数をFFmpegNormalizeのコンストラクタ引数に変換する"""
-        kwargs: dict[str, Any] = {}
-        args = cast("list[str]", self._configuration_args(self.pp_key()))  # type: ignore[attr-defined]
-        param_map = self._build_param_map()
-
-        i = 0
-        while i < len(args):
-            key = args[i]
-            mapping = param_map.get(key)
-            if not mapping:
-                i += 1
-                continue
-
-            param_name, param_type = mapping
-            if param_type is bool:
-                kwargs[param_name] = True
-                i += 1
-            elif i + 1 < len(args):
-                try:
-                    kwargs[param_name] = param_type(args[i + 1])
-                except ValueError:
-                    self.report_warning(f"無効な引数値をスキップ: {key} {args[i + 1]}")
-                i += 2
-            else:
-                i += 1
-        return kwargs
-
-    def _normalize_file(self, filepath: str) -> None:
-        """指定されたファイルの音量を正規化する
-
-        一時ファイルに正規化した結果を出力し、成功した場合のみ元ファイルを置換する
-        """
-        path = Path(filepath)
-        if not path.exists():
-            self.report_warning(f"ファイルが存在しません。スキップします: {filepath}")
-            return
-
-        msg = f"音量の正規化を開始します: {path.name}"
-        self.to_screen(msg)  # pyright: ignore[reportCallIssue]
-
-        try:
-            fd, tmp_path = tempfile.mkstemp(suffix=path.suffix, dir=path.parent)
-            os.close(fd)
-        except OSError:
-            self.report_warning(
-                "一時ファイルの作成に失敗しました。正規化をスキップします"
-            )
-            return
-
-        try:
-            kwargs = self._build_normalize_kwargs()
-            norm = FFmpegNormalize(**kwargs)
-            norm.add_media_file(str(path), tmp_path)
-            norm.run_normalization()
-            shutil.move(tmp_path, str(path))
-            msg = f"音量の正規化が完了しました: {path.name}"
-            self.to_screen(msg)  # pyright: ignore[reportCallIssue]
-        except (FFmpegNormalizeError, OSError) as e:
-            self.report_warning(
-                f"音量の正規化に失敗しました。元ファイルを保持します: {e}"
-            )
-            Path(tmp_path).unlink(missing_ok=True)
 
 
 def download_video(
