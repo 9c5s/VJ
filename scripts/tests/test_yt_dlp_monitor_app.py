@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
 
 from yt_dlp_monitor import DownloadQueue
 
@@ -41,7 +40,7 @@ class TestYtDlpMonitorAppWorker:
         )
         t = threading.Thread(target=app._download_worker, daemon=True)
         t.start()
-        time.sleep(0.1)
+        dq.join()
         assert fake.downloaded == ["https://example.com/1"]
 
     def test_processes_urls_in_fifo_order(self) -> None:
@@ -62,7 +61,7 @@ class TestYtDlpMonitorAppWorker:
         )
         t = threading.Thread(target=app._download_worker, daemon=True)
         t.start()
-        time.sleep(0.2)
+        dq.join()
         assert fake.downloaded == [
             "https://example.com/1",
             "https://example.com/2",
@@ -85,7 +84,7 @@ class TestYtDlpMonitorAppWorker:
         )
         t = threading.Thread(target=app._download_worker, daemon=True)
         t.start()
-        time.sleep(0.1)
+        dq.join()
         assert dq.enqueue("https://example.com/1") is True
 
     def test_continues_after_downloader_raises_exception(self) -> None:
@@ -105,7 +104,7 @@ class TestYtDlpMonitorAppWorker:
         )
         t = threading.Thread(target=app._download_worker, daemon=True)
         t.start()
-        time.sleep(0.2)
+        dq.join()
         assert fake.downloaded == ["https://example.com/ok"]
         # 失敗したURLもmark_doneされ再enqueue可能
         assert dq.enqueue("https://example.com/fail") is True

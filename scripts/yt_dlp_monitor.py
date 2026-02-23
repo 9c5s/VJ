@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 import pyperclip
 import yt_dlp
 from yt_dlp.utils import DownloadError
-from yt_dlp_plugins.postprocessor.audio_normalize import (  # pyright: ignore[reportMissingTypeStubs]
+from yt_dlp_plugins.postprocessor.audio_normalize import (  # pyright: ignore[reportMissingImports,reportMissingTypeStubs]
     AudioNormalizePP,
 )
 
@@ -242,6 +242,10 @@ class DownloadQueue:
         with self._lock:
             self._seen.discard(url)
         self._queue.task_done()
+
+    def join(self) -> None:
+        """全てのキュー内タスクの完了を待機する"""
+        self._queue.join()
 
 
 class ClipboardWatcher:
