@@ -15,15 +15,20 @@ from __future__ import annotations
 
 import argparse
 import logging
+import queue
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Final,
     NamedTuple,
-    NoReturn,
 )
 from urllib.parse import urlparse
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
 
 import pyperclip
 import yt_dlp
@@ -184,9 +189,257 @@ def parse_args() -> ParsedArgs:
     return ParsedArgs(yt_dlp_options=yt_dlp_options, normalize=not args.no_normalize)
 
 
+class DownloadQueue:
+    """URL用FIFOキューと重複排除を提供する
+
+    スレッドセーフなキューでURLの追加・取得を管理し、
+    重複URLのキュー投入を防止する
+    """
+
+    def __init__(self) -> None:
+        """インスタンスを初期化する"""
+        self._queue: queue.Queue[str] = queue.Queue()
+        self._seen: set[str] = set()
+        self._lock = threading.Lock()
+
+    @property
+    def pending_count(self) -> int:
+        """キュー内のURL数を返す"""
+        return self._queue.qsize()
+
+    def enqueue(self, url: str) -> bool:
+        """URLをキューに追加する
+
+        既にキュー内またはダウンロード中のURLは追加しない
+
+        Args:
+            url: 追加するURL
+
+        Returns:
+            追加できた場合はTrue、重複の場合はFalse
+        """
+        with self._lock:
+            if url in self._seen:
+                return False
+            self._seen.add(url)
+            self._queue.put(url)
+        return True
+
+    def dequeue(self) -> str:
+        """キューからURLを取得する(ブロッキング)
+
+        Returns:
+            キューの先頭のURL
+        """
+        return self._queue.get()
+
+    def mark_done(self, url: str) -> None:
+        """URLのダウンロード完了を記録し、重複排除セットから除去する
+
+        Args:
+            url: ダウンロードが完了したURL
+        """
+        with self._lock:
+            self._seen.discard(url)
+        self._queue.task_done()
+
+
+class ClipboardWatcher:
+    """クリップボードを監視し、変更されたテキストを検出する
+
+    poll_fnを定期的に呼び出し、前回と異なるテキストが検出された場合にyieldする
+    """
+
+    def __init__(
+        self,
+        poll_fn: Callable[[], str] = pyperclip.paste,
+        interval: float = POLLING_INTERVAL,
+    ) -> None:
+        """インスタンスを初期化する
+
+        Args:
+            poll_fn: クリップボードの内容を返す関数
+            interval: ポーリング間隔(秒)
+        """
+        self._poll_fn = poll_fn
+        self._interval = interval
+
+    def poll_changes(self) -> Iterator[str]:
+        """クリップボードの変更を検出してyieldするジェネレータ
+
+        起動時のクリップボード内容は無視し、変更が検出された場合のみyieldする
+        PyperclipExceptionが発生した場合はスキップして監視を継続する
+
+        Yields:
+            変更後のクリップボードテキスト
+        """
+        try:
+            last_text = self._poll_fn()
+        except pyperclip.PyperclipException:
+            last_text = ""
+
+        while True:
+            try:
+                current_text = self._poll_fn()
+            except pyperclip.PyperclipException:
+                time.sleep(self._interval)
+                continue
+
+            if current_text != last_text:
+                last_text = current_text
+                yield current_text
+
+            time.sleep(self._interval)
+
+
+class VideoDownloader:
+    """yt-dlpを使用して動画をダウンロードする
+
+    ダウンロードディレクトリの解決・作成とyt-dlpによるダウンロード実行を担う
+    """
+
+    def __init__(
+        self,
+        yt_dlp_options: list[str],
+        logger: logging.Logger,
+        *,
+        normalize: bool = True,
+    ) -> None:
+        """インスタンスを初期化する
+
+        Args:
+            yt_dlp_options: yt-dlpに渡すオプションリスト
+            logger: ロガーインスタンス
+            normalize: Trueの場合、ダウンロード後に音量を正規化する
+
+        Raises:
+            OSError: ダウンロードディレクトリの作成に失敗した場合
+        """
+        self._yt_dlp_options = yt_dlp_options
+        self._ydl_opts = yt_dlp.parse_options(yt_dlp_options).ydl_opts
+        self._logger = logger
+        self._normalize = normalize
+        self._download_dir = self._resolve_download_dir()
+        self._download_dir.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def download_dir(self) -> Path:
+        """ダウンロードディレクトリを返す"""
+        return self._download_dir
+
+    def _resolve_download_dir(self) -> Path:
+        """オプションからダウンロードディレクトリを解決する"""
+        parsed = _parse_option_list(self._yt_dlp_options)
+        p_values = parsed.get("-P")
+        return Path(p_values[-1] if p_values else str(DOWNLOAD_DIR))
+
+    def download(self, url: str) -> None:
+        """指定されたURLに対してyt-dlpでダウンロードを実行する
+
+        DownloadErrorをキャッチしてログ出力する
+        それ以外の例外は呼び出し元に伝播する
+
+        Args:
+            url: ダウンロード対象のURL
+        """
+        try:
+            self._logger.info("ダウンロードを開始します: %s", url)
+            self._logger.debug("yt-dlp options: %s", self._yt_dlp_options)
+            with yt_dlp.YoutubeDL(self._ydl_opts) as ydl:
+                if self._normalize:
+                    ydl.add_post_processor(AudioNormalizePP(), when="after_move")
+                ret = ydl.download([url])
+            if ret != 0:
+                self._logger.error("ダウンロードがエラーで終了しました (code=%d)", ret)
+            else:
+                self._logger.info("ダウンロードが正常に完了しました")
+        except DownloadError:
+            self._logger.exception("ダウンロードに失敗しました")
+
+
+class YtDlpMonitorApp:
+    """クリップボード監視、ダウンロードキュー、ワーカーの統合管理
+
+    ClipboardWatcher、VideoDownloader、DownloadQueueを組み合わせて
+    クリップボード監視からダウンロードまでの一連の処理を実行する
+    """
+
+    def __init__(
+        self,
+        watcher: ClipboardWatcher,
+        downloader: VideoDownloader,
+        download_queue: DownloadQueue,
+        logger: logging.Logger,
+    ) -> None:
+        """インスタンスを初期化する
+
+        Args:
+            watcher: クリップボード監視インスタンス
+            downloader: ダウンロード実行インスタンス
+            download_queue: URL用FIFOキュー
+            logger: ロガーインスタンス
+        """
+        self._watcher = watcher
+        self._downloader = downloader
+        self._queue = download_queue
+        self._logger = logger
+
+    def _download_worker(self) -> None:
+        """ワーカースレッド: キューからURLを取得してダウンロードを実行する
+
+        daemonスレッドとして実行され、キューからURLを取り出し
+        downloaderでダウンロードを実行する。メインスレッド終了時に自動終了する。
+        """
+        while True:
+            url = self._queue.dequeue()
+            try:
+                self._downloader.download(url)
+            except Exception:
+                self._logger.exception("ダウンロード中に予期しないエラーが発生しました")
+            finally:
+                self._queue.mark_done(url)
+
+    def _start_worker(self) -> None:
+        """ワーカースレッドを起動する"""
+        worker = threading.Thread(target=self._download_worker, daemon=True)
+        worker.start()
+
+    def run(self) -> None:
+        """メインループを開始する
+
+        クリップボードの変更を監視し、有効なURLを検出した場合は
+        ダウンロードキューに追加する
+        """
+        self._logger.info("クリップボード監視を開始します")
+        self._logger.info("停止するには Ctrl+C を押してください")
+        self._start_worker()
+
+        try:
+            for text in self._watcher.poll_changes():
+                if is_valid_url(text):
+                    if self._queue.enqueue(text):
+                        self._logger.info(
+                            "キューに追加しました: %s (待機中: %d件)",
+                            text,
+                            self._queue.pending_count,
+                        )
+                    else:
+                        self._logger.info("既にキューに存在します: %s", text)
+                else:
+                    self._logger.debug(
+                        "クリップボードの変更を検知しましたが、URLではありません"
+                    )
+
+        except KeyboardInterrupt:
+            self._logger.info("クリップボード監視を停止します")
+            sys.exit(0)
+
+
 def setup_logger() -> logging.Logger:
     """アプリケーションロガーを構成して返す"""
     logger = logging.getLogger(__name__)
+    if logger.handlers:
+        return logger
     logger.setLevel(logging.INFO)
     handler = logging.StreamHandler(sys.stdout)
     formatter = logging.Formatter(
@@ -214,96 +467,17 @@ def is_valid_url(text: str) -> bool:
         return False
 
 
-def download_video(
-    url: str,
-    logger: logging.Logger,
-    yt_dlp_options: list[str],
-    *,
-    normalize: bool = True,
-) -> None:
-    """指定されたURLに対してyt-dlpでダウンロードを実行する
-
-    Args:
-        url: ダウンロード対象のURL
-        logger: 状態を出力するためのロガーインスタンス
-        yt_dlp_options: yt-dlpに渡すオプションリスト
-        normalize: Trueの場合、ダウンロード後に音量を正規化する
-    """
-    # マージ済みオプションからダウンロードディレクトリを取得して作成する
-    parsed = _parse_option_list(yt_dlp_options)
-    p_values = parsed.get("-P")
-    download_dir = Path(p_values[-1] if p_values else str(DOWNLOAD_DIR))
-    try:
-        download_dir.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        logger.exception("ダウンロードディレクトリの作成に失敗しました")
-        return
-
-    opts = yt_dlp.parse_options(yt_dlp_options).ydl_opts
-
-    try:
-        logger.info("ダウンロードを開始します: %s", url)
-        logger.debug("yt-dlp options: %s", yt_dlp_options)
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            if normalize:
-                ydl.add_post_processor(AudioNormalizePP(), when="after_move")
-            ret = ydl.download([url])
-        if ret != 0:
-            logger.error("ダウンロードがエラーで終了しました (code=%d)", ret)
-        else:
-            logger.info("ダウンロードが正常に完了しました")
-    except DownloadError:
-        logger.exception("ダウンロードに失敗しました")
-
-
-def monitor_clipboard(yt_dlp_options: list[str], *, normalize: bool = True) -> NoReturn:
-    """新しいURLがないかクリップボードを継続的に監視する
-
-    定義された間隔でクリップボードの内容を確認する無限ループを実行する
-    変更された内容が有効なURLである場合、ダウンロードプロセスをトリガーする
-
-    Args:
-        yt_dlp_options: yt-dlpに渡すオプションリスト
-        normalize: Trueの場合、ダウンロード後に音量を正規化する
-    """
-    logger = setup_logger()
-    logger.info("クリップボード監視を開始します")
-    logger.info("停止するには Ctrl+C を押してください")
-
-    last_text: str = ""
-
-    try:
-        # 起動時に既にURLが存在する場合に反応しないよう、
-        # 現在のクリップボードの内容で last_text を初期化する
-        last_text = pyperclip.paste()
-
-        while True:
-            try:
-                current_text = pyperclip.paste()
-            except pyperclip.PyperclipException:
-                # クリップボードへのアクセスが一時的に失敗した場合の処理
-                time.sleep(POLLING_INTERVAL)
-                continue
-
-            if current_text != last_text:
-                last_text = current_text
-                if is_valid_url(current_text):
-                    logger.info("URLを検知しました: %s", current_text)
-                    download_video(
-                        current_text, logger, yt_dlp_options, normalize=normalize
-                    )
-                else:
-                    logger.debug(
-                        "クリップボードの変更を検知しましたが、URLではありません"
-                    )
-
-            time.sleep(POLLING_INTERVAL)
-
-    except KeyboardInterrupt:
-        logger.info("クリップボード監視を停止します")
-        sys.exit(0)
-
-
 if __name__ == "__main__":
     parsed = parse_args()
-    monitor_clipboard(parsed.yt_dlp_options, normalize=parsed.normalize)
+    logger = setup_logger()
+    watcher = ClipboardWatcher()
+    downloader = VideoDownloader(
+        parsed.yt_dlp_options, logger, normalize=parsed.normalize
+    )
+    app = YtDlpMonitorApp(
+        watcher=watcher,
+        downloader=downloader,
+        download_queue=DownloadQueue(),
+        logger=logger,
+    )
+    app.run()
