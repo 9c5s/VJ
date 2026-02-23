@@ -28,16 +28,20 @@ class TestVideoDownloader:
         )
         assert downloader.download_dir == dl_dir
 
-    def test_resolves_default_download_dir_when_no_p_option(self) -> None:
+    def test_resolves_default_download_dir_when_no_p_option(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """オプションに-Pがない場合、デフォルトディレクトリを使用する"""
-        from yt_dlp_monitor import DOWNLOAD_DIR, VideoDownloader
+        import yt_dlp_monitor
 
+        fake_default = tmp_path / "yt_dlp"
+        monkeypatch.setattr(yt_dlp_monitor, "DOWNLOAD_DIR", fake_default)
         logger = logging.getLogger("test")
-        downloader = VideoDownloader(
+        downloader = yt_dlp_monitor.VideoDownloader(
             yt_dlp_options=["--ignore-config"],
             logger=logger,
         )
-        assert downloader.download_dir == DOWNLOAD_DIR
+        assert downloader.download_dir == fake_default
 
     def test_creates_download_directory(self, tmp_path: Path) -> None:
         """コンストラクタでダウンロードディレクトリが作成される"""
