@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
-from audio_normalize import collect_files
+from audio_normalize import collect_files, probe_media
 
 
 class TestCollectFiles:
@@ -60,3 +63,89 @@ class TestCollectFiles:
         f.touch()
         result = collect_files([tmp_path])
         assert result == [f]
+
+
+class TestProbeMedia:
+    """probe_media: ffprobeでメタデータを取得する"""
+
+    def test_returns_codec_and_sample_rate_and_bitrate(self) -> None:
+        """ffprobeの出力からcodec, sample_rate, bitrateを抽出する"""
+        ffprobe_output = json.dumps({
+            "streams": [
+                {
+                    "codec_type": "audio",
+                    "codec_name": "aac",
+                    "sample_rate": "44100",
+                    "bit_rate": "128000",
+                }
+            ],
+            "format": {"format_name": "mp4"},
+        })
+        with patch("audio_normalize.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout=ffprobe_output
+            )
+            result = probe_media(Path("test.mp4"))
+        assert result == {
+            "audio_codec": "aac",
+            "sample_rate": 44100,
+            "audio_bitrate": "128k",
+        }
+
+    def test_returns_empty_dict_on_ffprobe_failure(self) -> None:
+        """ffprobeが失敗した場合は空辞書を返す"""
+        with patch("audio_normalize.subprocess.run") as mock_run:
+            mock_run.side_effect = FileNotFoundError
+            result = probe_media(Path("test.mp4"))
+        assert result == {}
+
+    def test_returns_empty_dict_on_no_audio_stream(self) -> None:
+        """音声ストリームがない場合は空辞書を返す"""
+        ffprobe_output = json.dumps({
+            "streams": [{"codec_type": "video", "codec_name": "h264"}],
+            "format": {"format_name": "mp4"},
+        })
+        with patch("audio_normalize.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout=ffprobe_output
+            )
+            result = probe_media(Path("test.mp4"))
+        assert result == {}
+
+    def test_codec_map_converts_opus_to_libopus(self) -> None:
+        """opusコーデックはlibopusに変換される"""
+        ffprobe_output = json.dumps({
+            "streams": [
+                {
+                    "codec_type": "audio",
+                    "codec_name": "opus",
+                    "sample_rate": "48000",
+                }
+            ],
+            "format": {"format_name": "webm"},
+        })
+        with patch("audio_normalize.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout=ffprobe_output
+            )
+            result = probe_media(Path("test.webm"))
+        assert result["audio_codec"] == "libopus"
+
+    def test_missing_bitrate_excluded_from_result(self) -> None:
+        """ビットレート情報がない場合はaudio_bitrateキーを含まない"""
+        ffprobe_output = json.dumps({
+            "streams": [
+                {
+                    "codec_type": "audio",
+                    "codec_name": "flac",
+                    "sample_rate": "96000",
+                }
+            ],
+            "format": {"format_name": "flac"},
+        })
+        with patch("audio_normalize.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout=ffprobe_output
+            )
+            result = probe_media(Path("test.flac"))
+        assert "audio_bitrate" not in result
