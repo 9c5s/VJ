@@ -154,11 +154,22 @@ class TestYtDlpMonitorAppRun:
         ]
 
     def test_duplicate_urls_are_not_downloaded_twice(self) -> None:
-        """重複URLは2回ダウンロードされない"""
+        """重複URLは2回ダウンロードされない
+
+        ワーカーのdownloadをEventでブロックし、run()が全URLを処理した後に
+        解放することで、enqueueの重複排除が確実にテストされる
+        """
         from yt_dlp_monitor import YtDlpMonitorApp
 
         dq = DownloadQueue()
-        fake = FakeDownloader()
+        proceed = threading.Event()
+
+        class BlockingDownloader(FakeDownloader):
+            def download(self, url: str) -> None:
+                proceed.wait()
+                super().download(url)
+
+        fake = BlockingDownloader()
         logger = logging.getLogger("test_run")
         app = YtDlpMonitorApp(
             watcher=_FiniteWatcher(  # type: ignore[arg-type]
@@ -172,6 +183,7 @@ class TestYtDlpMonitorAppRun:
             logger=logger,
         )
         app.run()
+        proceed.set()
         dq.join()
         assert fake.downloaded == ["https://example.com/video1"]
 
