@@ -112,6 +112,42 @@ _CODEC_MAP: dict[str, str] = {
 }
 
 
+def _extract_audio_defaults(audio_stream: dict[str, Any]) -> dict[str, Any]:
+    """音声ストリームからFFmpegNormalizeのデフォルト値を抽出する
+
+    codec_nameは_CODEC_MAPで変換し、sample_rateとbit_rateは
+    数値変換を試みる 変換に失敗した場合はその項目をスキップする
+
+    Args:
+        audio_stream: ffprobeが返す音声ストリーム情報の辞書
+
+    Returns:
+        audio_codec, sample_rate, audio_bitrateを含む辞書
+        各項目は取得/変換できた場合のみ含まれる
+    """
+    defaults: dict[str, Any] = {}
+
+    codec = audio_stream.get("codec_name")
+    if codec:
+        defaults["audio_codec"] = _CODEC_MAP.get(codec, codec)
+
+    sample_rate = audio_stream.get("sample_rate")
+    if sample_rate is not None:
+        try:
+            defaults["sample_rate"] = int(sample_rate)
+        except (ValueError, TypeError):
+            logger.warning("sample_rateの変換に失敗しました: %s", sample_rate)
+
+    bit_rate = audio_stream.get("bit_rate")
+    if bit_rate is not None:
+        try:
+            defaults["audio_bitrate"] = f"{int(bit_rate) // 1000}k"
+        except (ValueError, TypeError):
+            logger.warning("bit_rateの変換に失敗しました: %s", bit_rate)
+
+    return defaults
+
+
 def probe_media(filepath: Path) -> dict[str, Any]:
     """ffprobeで入力ファイルの音声メタデータを取得する
 
@@ -140,7 +176,7 @@ def probe_media(filepath: Path) -> dict[str, Any]:
             timeout=30,
         )
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
-        logger.warning("ffprobeの実行に失敗しました: %s", filepath)
+        logger.warning("ffprobeの実行に失敗しました: %s", filepath, exc_info=True)
         return {}
 
     try:
@@ -159,21 +195,7 @@ def probe_media(filepath: Path) -> dict[str, Any]:
         logger.warning("音声ストリームが見つかりませんでした: %s", filepath)
         return {}
 
-    defaults: dict[str, Any] = {}
-
-    codec = audio_stream.get("codec_name")
-    if codec:
-        defaults["audio_codec"] = _CODEC_MAP.get(codec, codec)
-
-    sample_rate = audio_stream.get("sample_rate")
-    if sample_rate is not None:
-        defaults["sample_rate"] = int(sample_rate)
-
-    bit_rate = audio_stream.get("bit_rate")
-    if bit_rate is not None:
-        defaults["audio_bitrate"] = f"{int(bit_rate) // 1000}k"
-
-    return defaults
+    return _extract_audio_defaults(audio_stream)
 
 
 FIXED_DEFAULTS: dict[str, Any] = {
@@ -221,8 +243,8 @@ def build_normalize_kwargs(
                 kwargs[param_name] = param_type(value)
             except StopIteration:
                 logger.warning("引数の値がありません: %s", key)
-            except (ValueError, TypeError):
-                logger.warning("無効な引数値です: %s", key)
+            except (ValueError, TypeError) as e:
+                logger.warning("無効な引数値です: %s (%s)", key, e)
 
     return kwargs
 
@@ -247,7 +269,7 @@ def normalize_file(
         正規化が成功した場合はTrue、失敗した場合はFalse
     """
     if not filepath.exists():
-        logger.error("ファイルが存在しません: %s", filepath)
+        logger.warning("ファイルが存在しません: %s", filepath)
         return False
 
     logger.info("正規化を開始: %s", filepath.name)
@@ -263,10 +285,19 @@ def _normalize_to_dir(
     kwargs: dict[str, Any],
     output_dir: Path,
 ) -> bool:
-    """出力ディレクトリに正規化結果を書き出す"""
-    output_path = str(output_dir / filepath.name)
+    """出力ディレクトリに正規化結果を書き出す
+
+    Args:
+        filepath: 入力ファイルのパス
+        kwargs: FFmpegNormalizeコンストラクタに渡す引数
+        output_dir: 出力先ディレクトリ
+
+    Returns:
+        正規化が成功した場合はTrue、失敗した場合はFalse
+    """
     ext = kwargs.get("extension", filepath.suffix.lstrip("."))
     kwargs = {**kwargs, "extension": ext}
+    output_path = str(output_dir / f"{filepath.stem}.{ext}")
     try:
         norm = FFmpegNormalize(**kwargs)
         norm.add_media_file(str(filepath), output_path)
@@ -282,7 +313,18 @@ def _normalize_overwrite(
     filepath: Path,
     kwargs: dict[str, Any],
 ) -> bool:
-    """一時ファイル経由で元ファイルを上書きする"""
+    """一時ファイル経由で元ファイルを上書きする
+
+    一時ファイルに正規化結果を書き出した後、元ファイルを置換する
+    失敗した場合は一時ファイルを削除する
+
+    Args:
+        filepath: 入力ファイルのパス
+        kwargs: FFmpegNormalizeコンストラクタに渡す引数
+
+    Returns:
+        正規化が成功した場合はTrue、失敗した場合はFalse
+    """
     try:
         fd, tmp_path = tempfile.mkstemp(suffix=filepath.suffix, dir=filepath.parent)
         os.close(fd)
@@ -306,7 +348,11 @@ def _normalize_overwrite(
 
 
 def setup_logger() -> None:
-    """ロガーを設定する"""
+    """モジュールロガーにStreamHandlerを設定する
+
+    ハンドラが未設定の場合のみstdoutへのStreamHandlerを追加し、
+    INFOレベルで出力する 既にハンドラが設定済みの場合は何もしない
+    """
     if logger.handlers:
         return
     handler = logging.StreamHandler(sys.stdout)
@@ -320,17 +366,21 @@ def setup_logger() -> None:
 
 
 def main() -> None:
-    """メインエントリポイント"""
+    """メインエントリポイント
+
+    CLI引数を解析し、対象ファイルを収集して順次正規化を実行する
+    処理対象がない場合や失敗がある場合はsys.exit(1)で終了する
+    """
     setup_logger()
     args = parse_args()
-
-    if args.output is not None:
-        args.output.mkdir(parents=True, exist_ok=True)
 
     files = collect_files(args.paths)
     if not files:
         logger.error("処理対象のファイルが見つかりませんでした")
         sys.exit(1)
+
+    if args.output is not None:
+        args.output.mkdir(parents=True, exist_ok=True)
 
     logger.info("処理対象: %d件", len(files))
 

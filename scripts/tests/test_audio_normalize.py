@@ -168,6 +168,27 @@ class TestProbeMedia:
             result = probe_media(Path("test.flac"))
         assert "audio_bitrate" not in result
 
+    def test_non_numeric_bitrate_excluded_from_result(self) -> None:
+        """bit_rateが'N/A'など非数値の場合はaudio_bitrateキーを含まない"""
+        ffprobe_output = json.dumps({
+            "streams": [
+                {
+                    "codec_type": "audio",
+                    "codec_name": "opus",
+                    "sample_rate": "48000",
+                    "bit_rate": "N/A",
+                }
+            ],
+            "format": {"format_name": "webm"},
+        })
+        with patch("audio_normalize.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout=ffprobe_output
+            )
+            result = probe_media(Path("test.webm"))
+        assert "audio_bitrate" not in result
+        assert result["sample_rate"] == 48000
+
 
 class TestBuildNormalizeKwargs:
     """build_normalize_kwargs: デフォルト値、probe値、CLI引数をマージする"""
