@@ -13,14 +13,16 @@ CLI引数とドラッグ&ドロップの両方に対応する
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from ffmpeg_normalize import FFmpegNormalize  # pyright: ignore[reportMissingImports]
 from yt_dlp_plugins.postprocessor.audio_normalize import (  # pyright: ignore[reportMissingImports,reportMissingTypeStubs]
@@ -31,6 +33,52 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
+
+
+class ParsedArgs(NamedTuple):
+    """parse_args()の戻り値"""
+
+    paths: list[Path]
+    output: Path | None
+    normalize_args: list[str]
+
+
+def parse_args() -> ParsedArgs:
+    """コマンドライン引数を解析する
+
+    Returns:
+        パース結果を格納したParsedArgs
+    """
+    # -- でsys.argvを分割し、前半をargparseに渡す
+    argv = sys.argv[1:]
+    normalize_args: list[str] = []
+    if "--" in argv:
+        sep_idx = argv.index("--")
+        normalize_args = argv[sep_idx + 1 :]
+        argv = argv[:sep_idx]
+
+    parser = argparse.ArgumentParser(
+        description="音声/動画ファイルの音量をffmpeg-normalizeで正規化する",
+    )
+    parser.add_argument(
+        "paths",
+        nargs="+",
+        type=Path,
+        help="正規化するファイルまたはフォルダのパス",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="出力先ディレクトリ(省略時は元ファイルを上書き)",
+    )
+    args = parser.parse_args(argv)
+
+    return ParsedArgs(
+        paths=[Path(p) for p in args.paths],
+        output=args.output,
+        normalize_args=normalize_args,
+    )
 
 
 def collect_files(paths: Sequence[Path]) -> list[Path]:
@@ -249,3 +297,53 @@ def _normalize_overwrite(
         Path(tmp_path).unlink(missing_ok=True)
         return False
     return True
+
+
+def setup_logger() -> None:
+    """ロガーを設定する"""
+    handler = logging.StreamHandler(sys.stdout)
+    formatter = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+
+def main() -> None:
+    """メインエントリポイント"""
+    setup_logger()
+    args = parse_args()
+
+    if args.output is not None:
+        args.output.mkdir(parents=True, exist_ok=True)
+
+    files = collect_files(args.paths)
+    if not files:
+        logger.error("処理対象のファイルが見つかりませんでした")
+        sys.exit(1)
+
+    logger.info("処理対象: %d件", len(files))
+
+    success = 0
+    fail = 0
+
+    for filepath in files:
+        probe = probe_media(filepath)
+        kwargs = build_normalize_kwargs(args.normalize_args, probe)
+        # extensionはprobeから取得せず、入力ファイルの拡張子を使用する
+        kwargs["extension"] = filepath.suffix.lstrip(".")
+        if normalize_file(filepath, kwargs, output_dir=args.output):
+            success += 1
+        else:
+            fail += 1
+
+    logger.info("完了: 成功 %d件, 失敗 %d件", success, fail)
+
+    if fail > 0:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
