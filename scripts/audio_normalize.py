@@ -211,6 +211,7 @@ def build_normalize_kwargs(
     for key in args_iter:
         mapping = param_map.get(key)  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
         if not mapping:
+            logger.warning("不明なフラグです: %s", key)
             continue
         param_name, param_type = mapping  # pyright: ignore[reportUnknownVariableType]
         if param_type is bool:
@@ -265,6 +266,7 @@ def _normalize_to_dir(
 ) -> bool:
     """出力ディレクトリに正規化結果を書き出す"""
     output_path = str(output_dir / filepath.name)
+    kwargs.setdefault("extension", filepath.suffix.lstrip("."))
     try:
         norm = FFmpegNormalize(**kwargs)  # pyright: ignore[reportUnknownVariableType]
         norm.add_media_file(str(filepath), output_path)  # pyright: ignore[reportUnknownMemberType]
@@ -288,6 +290,7 @@ def _normalize_overwrite(
         logger.exception("一時ファイルの作成に失敗しました")
         return False
 
+    kwargs.setdefault("extension", filepath.suffix.lstrip("."))
     try:
         norm = FFmpegNormalize(**kwargs)  # pyright: ignore[reportUnknownVariableType]
         norm.add_media_file(str(filepath), tmp_path)  # pyright: ignore[reportUnknownMemberType]
@@ -334,8 +337,6 @@ def main() -> None:
     for filepath in files:
         probe = probe_media(filepath)
         kwargs = build_normalize_kwargs(args.normalize_args, probe)
-        # extensionはprobeから取得せず、入力ファイルの拡張子を使用する
-        kwargs["extension"] = filepath.suffix.lstrip(".")
         if normalize_file(filepath, kwargs, output_dir=args.output):
             success += 1
         else:
