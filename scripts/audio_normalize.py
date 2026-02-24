@@ -15,16 +15,20 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ffmpeg_normalize import FFmpegNormalize  # pyright: ignore[reportMissingImports]
 from yt_dlp_plugins.postprocessor.audio_normalize import (  # pyright: ignore[reportMissingImports,reportMissingTypeStubs]
     AudioNormalizePP,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -171,3 +175,77 @@ def build_normalize_kwargs(
                 logger.warning("無効な引数値です: %s", key)
 
     return kwargs
+
+
+def normalize_file(
+    filepath: Path,
+    kwargs: dict[str, Any],
+    *,
+    output_dir: Path | None = None,
+) -> bool:
+    """ファイルの音量を正規化する
+
+    output_dirが指定されていない場合は一時ファイル経由で元ファイルを上書きする
+    output_dirが指定されている場合はそのディレクトリに出力する
+
+    Args:
+        filepath: 入力ファイルのパス
+        kwargs: FFmpegNormalizeコンストラクタに渡す引数
+        output_dir: 出力先ディレクトリ(省略時は元ファイルを上書き)
+
+    Returns:
+        正規化が成功した場合はTrue、失敗した場合はFalse
+    """
+    if not filepath.exists():
+        logger.error("ファイルが存在しません: %s", filepath)
+        return False
+
+    logger.info("正規化を開始: %s", filepath.name)
+
+    if output_dir is not None:
+        return _normalize_to_dir(filepath, kwargs, output_dir)
+
+    return _normalize_overwrite(filepath, kwargs)
+
+
+def _normalize_to_dir(
+    filepath: Path,
+    kwargs: dict[str, Any],
+    output_dir: Path,
+) -> bool:
+    """出力ディレクトリに正規化結果を書き出す"""
+    output_path = str(output_dir / filepath.name)
+    try:
+        norm = FFmpegNormalize(**kwargs)
+        norm.add_media_file(str(filepath), output_path)
+        norm.run_normalization()
+        logger.info("正規化が完了しました: %s", filepath.name)
+    except Exception:
+        logger.exception("正規化に失敗しました: %s", filepath.name)
+        return False
+    return True
+
+
+def _normalize_overwrite(
+    filepath: Path,
+    kwargs: dict[str, Any],
+) -> bool:
+    """一時ファイル経由で元ファイルを上書きする"""
+    try:
+        fd, tmp_path = tempfile.mkstemp(suffix=filepath.suffix, dir=filepath.parent)
+        os.close(fd)
+    except OSError:
+        logger.exception("一時ファイルの作成に失敗しました")
+        return False
+
+    try:
+        norm = FFmpegNormalize(**kwargs)
+        norm.add_media_file(str(filepath), tmp_path)
+        norm.run_normalization()
+        shutil.move(tmp_path, str(filepath))
+        logger.info("正規化が完了しました: %s", filepath.name)
+    except Exception:
+        logger.exception("正規化に失敗しました: %s", filepath.name)
+        Path(tmp_path).unlink(missing_ok=True)
+        return False
+    return True
