@@ -18,6 +18,10 @@ import logging
 import subprocess
 from typing import TYPE_CHECKING, Any
 
+from yt_dlp_plugins.postprocessor.audio_normalize import (  # pyright: ignore[reportMissingImports,reportMissingTypeStubs]
+    AudioNormalizePP,
+)
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
@@ -117,3 +121,53 @@ def probe_media(filepath: Path) -> dict[str, Any]:
         defaults["audio_bitrate"] = f"{int(bit_rate) // 1000}k"
 
     return defaults
+
+
+FIXED_DEFAULTS: dict[str, Any] = {
+    "target_level": -14.0,
+    "audio_codec": "aac",
+    "audio_bitrate": "128k",
+    "sample_rate": 48000,
+    "metadata_disable": True,
+    "chapters_disable": True,
+    "subtitle_disable": True,
+    "progress": True,
+}
+
+
+def build_normalize_kwargs(
+    cli_args: Sequence[str],
+    probe_defaults: dict[str, Any],
+) -> dict[str, Any]:
+    """固定デフォルト、probe値、CLI引数をマージしてFFmpegNormalize引数を構築する
+
+    優先順位(低->高): 固定デフォルト -> probe推定値 -> CLI引数
+
+    Args:
+        cli_args: CLI引数リスト(ffmpeg-normalize形式のフラグ)
+        probe_defaults: ffprobeから推定したデフォルト値
+
+    Returns:
+        FFmpegNormalizeコンストラクタに渡す引数の辞書
+    """
+    kwargs: dict[str, Any] = {**FIXED_DEFAULTS, **probe_defaults}
+
+    param_map = AudioNormalizePP._build_param_map()  # noqa: SLF001  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+    args_iter = iter(cli_args)
+    for key in args_iter:
+        mapping = param_map.get(key)  # pyright: ignore[reportUnknownMemberType]
+        if not mapping:
+            continue
+        param_name, param_type = mapping  # pyright: ignore[reportUnknownVariableType]
+        if param_type is bool:
+            kwargs[param_name] = True  # pyright: ignore[reportUnknownArgumentType]
+        else:
+            try:
+                value = next(args_iter)
+                kwargs[param_name] = param_type(value)  # pyright: ignore[reportUnknownArgumentType]
+            except StopIteration:
+                logger.warning("引数の値がありません: %s", key)
+            except (ValueError, TypeError):
+                logger.warning("無効な引数値です: %s", key)
+
+    return kwargs
