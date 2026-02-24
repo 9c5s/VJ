@@ -13,6 +13,7 @@ from audio_normalize import (
     FIXED_DEFAULTS,  # noqa: F401
     build_normalize_kwargs,
     collect_files,
+    main,
     normalize_file,
     parse_args,
     probe_media,
@@ -258,6 +259,19 @@ class TestNormalizeFile:
         result = normalize_file(tmp_path / "no.mp3", {"target_level": -14.0})
         assert result is False
 
+    def test_cleans_up_temp_file_on_error(self, tmp_path: Path) -> None:
+        """上書きモードで失敗時、一時ファイルが削除される"""
+        f = tmp_path / "test.mp3"
+        f.write_bytes(b"original")
+        with patch("audio_normalize.FFmpegNormalize") as mock_cls:
+            mock_norm = MagicMock()
+            mock_norm.run_normalization.side_effect = Exception("error")
+            mock_cls.return_value = mock_norm
+            normalize_file(f, {"target_level": -14.0})
+        # 元ファイル以外の一時ファイルが残っていないことを確認
+        remaining = list(tmp_path.iterdir())
+        assert remaining == [f]
+
 
 class TestParseArgs:
     """parse_args: コマンドライン引数を解析する"""
@@ -298,3 +312,63 @@ class TestParseArgs:
         args = parse_args()
         assert args.paths == [Path("test.mp3")]
         assert args.normalize_args == ["-c:a", "aac", "-b:a", "256k"]
+
+
+class TestMain:
+    """main: メインエントリポイント"""
+
+    def test_exits_with_error_when_no_files_found(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """処理対象のファイルが見つからない場合、exit code 1で終了する"""
+        empty_dir = tmp_path / "empty"
+        empty_dir.mkdir()
+        monkeypatch.setattr(sys, "argv", ["audio_normalize.py", str(empty_dir)])
+        with pytest.raises(SystemExit, match="1"):
+            main()
+
+    def test_exits_with_error_on_partial_failure(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """一部ファイルが失敗した場合、exit code 1で終了する"""
+        f = tmp_path / "test.mp3"
+        f.write_bytes(b"data")
+        monkeypatch.setattr(sys, "argv", ["audio_normalize.py", str(f)])
+        with (
+            patch("audio_normalize.probe_media", return_value={}),
+            patch("audio_normalize.normalize_file", return_value=False),
+            pytest.raises(SystemExit, match="1"),
+        ):
+            main()
+
+    def test_succeeds_when_all_files_normalized(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """全ファイルが成功した場合、正常に終了する"""
+        f = tmp_path / "test.mp3"
+        f.write_bytes(b"data")
+        monkeypatch.setattr(sys, "argv", ["audio_normalize.py", str(f)])
+        with (
+            patch("audio_normalize.probe_media", return_value={}),
+            patch("audio_normalize.normalize_file", return_value=True),
+        ):
+            main()  # SystemExitが発生しなければ成功
+
+    def test_creates_output_directory(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """--output指定時、ディレクトリが自動作成される"""
+        f = tmp_path / "test.mp3"
+        f.write_bytes(b"data")
+        output_dir = tmp_path / "new_output"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["audio_normalize.py", "--output", str(output_dir), str(f)],
+        )
+        with (
+            patch("audio_normalize.probe_media", return_value={}),
+            patch("audio_normalize.normalize_file", return_value=True),
+        ):
+            main()
+        assert output_dir.exists()
