@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from audio_normalize import (
     FIXED_DEFAULTS,  # noqa: F401
     build_normalize_kwargs,
     collect_files,
+    normalize_file,
     probe_media,
 )
 
@@ -207,3 +208,49 @@ class TestBuildNormalizeKwargs:
         """boolフラグは値なしで指定するとTrueになる"""
         result = build_normalize_kwargs(["--dual-mono"], {})
         assert result["dual_mono"] is True
+
+
+class TestNormalizeFile:
+    """normalize_file: ファイルの音量を正規化する"""
+
+    def test_overwrites_original_when_no_output(self, tmp_path: Path) -> None:
+        """output_pathなしの場合、元ファイルを上書きする"""
+        f = tmp_path / "test.mp3"
+        f.write_bytes(b"original")
+        with patch("audio_normalize.FFmpegNormalize") as mock_cls:
+            mock_norm = MagicMock()
+            mock_cls.return_value = mock_norm
+            result = normalize_file(f, {"target_level": -14.0})
+        assert result is True
+        mock_norm.add_media_file.assert_called_once()
+        mock_norm.run_normalization.assert_called_once()
+
+    def test_writes_to_output_dir_when_specified(self, tmp_path: Path) -> None:
+        """output_dir指定時、出力ディレクトリにファイルを書き出す"""
+        f = tmp_path / "test.mp3"
+        f.write_bytes(b"original")
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        with patch("audio_normalize.FFmpegNormalize") as mock_cls:
+            mock_norm = MagicMock()
+            mock_cls.return_value = mock_norm
+            result = normalize_file(f, {"target_level": -14.0}, output_dir=output_dir)
+        assert result is True
+        call_args = mock_norm.add_media_file.call_args[0]
+        assert str(output_dir) in call_args[1]
+
+    def test_returns_false_on_normalization_error(self, tmp_path: Path) -> None:
+        """正規化が失敗した場合はFalseを返す"""
+        f = tmp_path / "test.mp3"
+        f.write_bytes(b"original")
+        with patch("audio_normalize.FFmpegNormalize") as mock_cls:
+            mock_norm = MagicMock()
+            mock_norm.run_normalization.side_effect = Exception("ffmpeg error")
+            mock_cls.return_value = mock_norm
+            result = normalize_file(f, {"target_level": -14.0})
+        assert result is False
+
+    def test_returns_false_for_nonexistent_file(self, tmp_path: Path) -> None:
+        """存在しないファイルに対してはFalseを返す"""
+        result = normalize_file(tmp_path / "no.mp3", {"target_level": -14.0})
+        assert result is False
