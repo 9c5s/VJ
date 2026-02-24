@@ -130,11 +130,16 @@ class TestParseOptionList:
         """実際のYT_DLP_OPTIONSに近い複合入力が正しく解析される"""
         options = [
             "--ignore-config",
-            "-S", "codec:avc:aac,res:1080",
-            "-f", "bv+ba",
-            "-P", "/tmp/downloads",
-            "--ppa", "Merger+ffmpeg_o1:-map_metadata -1",
-            "--ppa", "AudioNormalize:-t -14.0",
+            "-S",
+            "codec:avc:aac,res:1080",
+            "-f",
+            "bv+ba",
+            "-P",
+            "/tmp/downloads",
+            "--ppa",
+            "Merger+ffmpeg_o1:-map_metadata -1",
+            "--ppa",
+            "AudioNormalize:-t -14.0",
         ]
 
         result = _parse_option_list(options)
@@ -199,6 +204,7 @@ class TestIsValidUrl:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """urlparseがValueErrorを送出する場合は無効と判定される"""
+
         def raise_value_error(_text: str) -> None:
             raise ValueError("invalid URL")
 
@@ -322,9 +328,7 @@ class TestParseArgs:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """--no-normalizeなしでyt-dlp引数指定時、normalize=Trueを返す"""
-        monkeypatch.setattr(
-            sys, "argv", ["yt_dlp_monitor.py", "--", "-f", "bv+ba"]
-        )
+        monkeypatch.setattr(sys, "argv", ["yt_dlp_monitor.py", "--", "-f", "bv+ba"])
         result = parse_args()
         assert result.normalize is True
 
@@ -332,9 +336,7 @@ class TestParseArgs:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """--no-normalizeなしでyt-dlp引数指定時、yt-dlpオプションが正しく渡される"""
-        monkeypatch.setattr(
-            sys, "argv", ["yt_dlp_monitor.py", "--", "-f", "bv+ba"]
-        )
+        monkeypatch.setattr(sys, "argv", ["yt_dlp_monitor.py", "--", "-f", "bv+ba"])
         result = parse_args()
         parsed = _parse_option_list(result.yt_dlp_options)
         assert parsed["-f"] == ["bv+ba"]
@@ -346,16 +348,22 @@ class TestParseArgs:
 class TestDownloadQueue:
     """DownloadQueue: URL用FIFOキューと重複排除"""
 
-    def test_enqueue_returns_true_for_new_url(self) -> None:
-        """新規URLのenqueueはTrueを返す"""
+    def test_enqueue_returns_pending_count_for_new_url(self) -> None:
+        """新規URLのenqueueは待機数を返す"""
         dq = DownloadQueue()
-        assert dq.enqueue("https://example.com/1") is True
+        assert dq.enqueue("https://example.com/1") == 1
 
-    def test_enqueue_returns_false_for_duplicate_url(self) -> None:
-        """既にキューにあるURLのenqueueはFalseを返す"""
+    def test_enqueue_returns_incremental_pending_count(self) -> None:
+        """連続enqueueが増加する待機数を返す"""
+        dq = DownloadQueue()
+        assert dq.enqueue("https://example.com/1") == 1
+        assert dq.enqueue("https://example.com/2") == 2
+
+    def test_enqueue_returns_none_for_duplicate_url(self) -> None:
+        """既にキューにあるURLのenqueueはNoneを返す"""
         dq = DownloadQueue()
         dq.enqueue("https://example.com/1")
-        assert dq.enqueue("https://example.com/1") is False
+        assert dq.enqueue("https://example.com/1") is None
 
     def test_empty_queue_has_zero_pending_count(self) -> None:
         """空キューのpending_countは0を返す"""
@@ -389,7 +397,7 @@ class TestDownloadQueue:
         dq.enqueue("https://example.com/1")
         url = dq.dequeue()
         dq.mark_done(url)
-        assert dq.enqueue("https://example.com/1") is True
+        assert dq.enqueue("https://example.com/1") is not None
 
     def test_dequeue_blocks_until_url_available(self) -> None:
         """dequeueはURLが投入されるまでブロックする"""
@@ -411,4 +419,4 @@ class TestDownloadQueue:
         dq = DownloadQueue()
         dq.enqueue("https://example.com/1")
         dq.dequeue()  # ダウンロード中
-        assert dq.enqueue("https://example.com/1") is False
+        assert dq.enqueue("https://example.com/1") is None

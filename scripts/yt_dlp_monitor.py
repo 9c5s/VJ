@@ -207,7 +207,7 @@ class DownloadQueue:
         """キュー内のURL数を返す"""
         return self._queue.qsize()
 
-    def enqueue(self, url: str) -> bool:
+    def enqueue(self, url: str) -> int | None:
         """URLをキューに追加する
 
         既にキュー内またはダウンロード中のURLは追加しない
@@ -216,14 +216,14 @@ class DownloadQueue:
             url: 追加するURL
 
         Returns:
-            追加できた場合はTrue、重複の場合はFalse
+            追加できた場合はキュー内の待機数、重複の場合はNone
         """
         with self._lock:
             if url in self._seen:
-                return False
+                return None
             self._seen.add(url)
             self._queue.put(url)
-        return True
+            return self._queue.qsize()
 
     def dequeue(self) -> str:
         """キューからURLを取得する(ブロッキング)
@@ -310,6 +310,10 @@ class VideoDownloader:
         normalize: bool = True,
     ) -> None:
         """インスタンスを初期化する
+
+        yt_dlp.parse_options()はコンストラクタで一度だけ実行され、
+        結果は全てのdownload()呼び出しで再利用される。
+        オプションの動的変更が必要な場合は新しいインスタンスを作成すること。
 
         Args:
             yt_dlp_options: yt-dlpに渡すオプションリスト
@@ -421,11 +425,12 @@ class YtDlpMonitorApp:
         try:
             for text in self._watcher.poll_changes():
                 if is_valid_url(text):
-                    if self._queue.enqueue(text):
+                    pending = self._queue.enqueue(text)
+                    if pending is not None:
                         self._logger.info(
                             "キューに追加しました: %s (待機中: %d件)",
                             text,
-                            self._queue.pending_count,
+                            pending,
                         )
                     else:
                         self._logger.info("既にキューに存在します: %s", text)
