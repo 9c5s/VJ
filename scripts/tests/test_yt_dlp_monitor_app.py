@@ -129,7 +129,7 @@ class TestYtDlpMonitorAppRun:
 
     def test_valid_urls_are_enqueued_and_downloaded(self) -> None:
         """有効なURLがキューに追加されダウンロードされる"""
-        from yt_dlp_monitor import DownloadQueue, YtDlpMonitorApp
+        from yt_dlp_monitor import YtDlpMonitorApp
 
         dq = DownloadQueue()
         fake = FakeDownloader()
@@ -155,7 +155,7 @@ class TestYtDlpMonitorAppRun:
 
     def test_duplicate_urls_are_not_downloaded_twice(self) -> None:
         """重複URLは2回ダウンロードされない"""
-        from yt_dlp_monitor import DownloadQueue, YtDlpMonitorApp
+        from yt_dlp_monitor import YtDlpMonitorApp
 
         dq = DownloadQueue()
         fake = FakeDownloader()
@@ -177,7 +177,7 @@ class TestYtDlpMonitorAppRun:
 
     def test_non_url_text_is_ignored(self) -> None:
         """URL以外のテキストはダウンロードされない"""
-        from yt_dlp_monitor import DownloadQueue, YtDlpMonitorApp
+        from yt_dlp_monitor import YtDlpMonitorApp
 
         dq = DownloadQueue()
         fake = FakeDownloader()
