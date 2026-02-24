@@ -7,7 +7,12 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
-from audio_normalize import collect_files, probe_media
+from audio_normalize import (
+    FIXED_DEFAULTS,  # noqa: F401
+    build_normalize_kwargs,
+    collect_files,
+    probe_media,
+)
 
 
 class TestCollectFiles:
@@ -149,3 +154,56 @@ class TestProbeMedia:
             )
             result = probe_media(Path("test.flac"))
         assert "audio_bitrate" not in result
+
+
+class TestBuildNormalizeKwargs:
+    """build_normalize_kwargs: デフォルト値、probe値、CLI引数をマージする"""
+
+    def test_no_overrides_returns_fixed_defaults(self) -> None:
+        """引数なしの場合、固定デフォルト値を返す"""
+        result = build_normalize_kwargs([], {})
+        assert result["target_level"] == -14.0
+        assert result["audio_codec"] == "aac"
+        assert result["audio_bitrate"] == "128k"
+        assert result["sample_rate"] == 48000
+        assert result["metadata_disable"] is True
+        assert result["chapters_disable"] is True
+        assert result["subtitle_disable"] is True
+        assert result["progress"] is True
+
+    def test_probe_defaults_override_fixed_defaults(self) -> None:
+        """probe値が固定デフォルトのcodec, bitrate, sample_rateを上書きする"""
+        probe = {
+            "audio_codec": "libopus",
+            "audio_bitrate": "192k",
+            "sample_rate": 44100,
+        }
+        result = build_normalize_kwargs([], probe)
+        assert result["audio_codec"] == "libopus"
+        assert result["audio_bitrate"] == "192k"
+        assert result["sample_rate"] == 44100
+        # 固定デフォルトは維持
+        assert result["target_level"] == -14.0
+
+    def test_cli_overrides_take_highest_priority(self) -> None:
+        """CLI引数がprobe値と固定デフォルトの両方を上書きする"""
+        probe = {"audio_codec": "libopus", "sample_rate": 44100}
+        result = build_normalize_kwargs(["-c:a", "aac", "-ar", "96000"], probe)
+        assert result["audio_codec"] == "aac"
+        assert result["sample_rate"] == 96000
+
+    def test_short_flags_are_recognized(self) -> None:
+        """短縮フラグ(-t, -c:a, -b:a等)が正しく解析される"""
+        result = build_normalize_kwargs(["-t", "-20.0", "-b:a", "256k"], {})
+        assert result["target_level"] == -20.0
+        assert result["audio_bitrate"] == "256k"
+
+    def test_long_flags_are_recognized(self) -> None:
+        """長形式フラグ(--target-level等)が正しく解析される"""
+        result = build_normalize_kwargs(["--target-level", "-20.0"], {})
+        assert result["target_level"] == -20.0
+
+    def test_bool_flags_without_value(self) -> None:
+        """boolフラグは値なしで指定するとTrueになる"""
+        result = build_normalize_kwargs(["--dual-mono"], {})
+        assert result["dual_mono"] is True
