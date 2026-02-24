@@ -10,7 +10,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from audio_normalize import (
-    FIXED_DEFAULTS,  # noqa: F401
     build_normalize_kwargs,
     collect_files,
     main,
@@ -223,7 +222,11 @@ class TestBuildNormalizeKwargs:
         assert result["dual_mono"] is True
 
     def test_unknown_flag_is_ignored(self) -> None:
-        """不明なフラグは無視され、他の引数に影響しない"""
+        """不明なフラグは無視され、他の引数に影響しない
+
+        --unknown-flagが値なしフラグとしてスキップされ、
+        次の-tがunknown-flagの値として消費されないことを確認する
+        """
         result = build_normalize_kwargs(["--unknown-flag", "-t", "-20.0"], {})
         assert result["target_level"] == -20.0
         assert "unknown-flag" not in result
@@ -248,13 +251,18 @@ class TestNormalizeFile:
         """output_pathなしの場合、元ファイルを上書きする"""
         f = tmp_path / "test.mp3"
         f.write_bytes(b"original")
-        with patch("audio_normalize.FFmpegNormalize") as mock_cls:
+        with (
+            patch("audio_normalize.FFmpegNormalize") as mock_cls,
+            patch("audio_normalize.shutil.move") as mock_move,
+        ):
             mock_norm = MagicMock()
             mock_cls.return_value = mock_norm
             result = normalize_file(f, {"target_level": -14.0})
         assert result is True
         mock_norm.add_media_file.assert_called_once()
         mock_norm.run_normalization.assert_called_once()
+        mock_move.assert_called_once()
+        assert mock_move.call_args[0][1] == str(f)
 
     def test_writes_to_output_dir_when_specified(self, tmp_path: Path) -> None:
         """output_dir指定時、出力ディレクトリにファイルを書き出す"""
@@ -369,8 +377,9 @@ class TestMain:
         f = tmp_path / "test.mp3"
         f.write_bytes(b"data")
         monkeypatch.setattr(sys, "argv", ["audio_normalize.py", str(f)])
+        probe = {"audio_codec": "aac", "sample_rate": 48000}
         with (
-            patch("audio_normalize.probe_media", return_value={}),
+            patch("audio_normalize.probe_media", return_value=probe),
             patch("audio_normalize.normalize_file", return_value=False),
             pytest.raises(SystemExit, match="1"),
         ):
@@ -383,8 +392,9 @@ class TestMain:
         f = tmp_path / "test.mp3"
         f.write_bytes(b"data")
         monkeypatch.setattr(sys, "argv", ["audio_normalize.py", str(f)])
+        probe = {"audio_codec": "aac", "sample_rate": 48000}
         with (
-            patch("audio_normalize.probe_media", return_value={}),
+            patch("audio_normalize.probe_media", return_value=probe),
             patch("audio_normalize.normalize_file", return_value=True),
         ):
             result = main()
@@ -402,8 +412,9 @@ class TestMain:
             "argv",
             ["audio_normalize.py", "--output", str(output_dir), str(f)],
         )
+        probe = {"audio_codec": "aac", "sample_rate": 48000}
         with (
-            patch("audio_normalize.probe_media", return_value={}),
+            patch("audio_normalize.probe_media", return_value=probe),
             patch("audio_normalize.normalize_file", return_value=True),
         ):
             main()

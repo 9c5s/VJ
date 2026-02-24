@@ -75,7 +75,7 @@ def parse_args() -> ParsedArgs:
     args = parser.parse_args(argv)
 
     return ParsedArgs(
-        paths=[Path(p) for p in args.paths],
+        paths=list(args.paths),
         output=args.output,
         normalize_args=normalize_args,
     )
@@ -137,8 +137,9 @@ def probe_media(filepath: Path) -> dict[str, Any]:
             capture_output=True,
             text=True,
             check=False,
+            timeout=30,
         )
-    except (FileNotFoundError, OSError):
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
         logger.warning("ffprobeの実行に失敗しました: %s", filepath)
         return {}
 
@@ -264,7 +265,8 @@ def _normalize_to_dir(
 ) -> bool:
     """出力ディレクトリに正規化結果を書き出す"""
     output_path = str(output_dir / filepath.name)
-    kwargs.setdefault("extension", filepath.suffix.lstrip("."))
+    ext = kwargs.get("extension", filepath.suffix.lstrip("."))
+    kwargs = {**kwargs, "extension": ext}
     try:
         norm = FFmpegNormalize(**kwargs)
         norm.add_media_file(str(filepath), output_path)
@@ -288,22 +290,25 @@ def _normalize_overwrite(
         logger.exception("一時ファイルの作成に失敗しました")
         return False
 
-    kwargs.setdefault("extension", filepath.suffix.lstrip("."))
+    ext = kwargs.get("extension", filepath.suffix.lstrip("."))
+    kwargs = {**kwargs, "extension": ext}
     try:
         norm = FFmpegNormalize(**kwargs)
         norm.add_media_file(str(filepath), tmp_path)
         norm.run_normalization()
         shutil.move(tmp_path, str(filepath))
-        logger.info("正規化が完了しました: %s", filepath.name)
     except Exception:
         logger.exception("正規化に失敗しました: %s", filepath.name)
         Path(tmp_path).unlink(missing_ok=True)
         return False
+    logger.info("正規化が完了しました: %s", filepath.name)
     return True
 
 
 def setup_logger() -> None:
     """ロガーを設定する"""
+    if logger.handlers:
+        return
     handler = logging.StreamHandler(sys.stdout)
     formatter = logging.Formatter(
         "%(asctime)s [%(levelname)s] %(message)s",
@@ -334,6 +339,11 @@ def main() -> None:
 
     for filepath in files:
         probe = probe_media(filepath)
+        if not probe:
+            logger.info(
+                "音声ストリームが存在しません スキップします: %s", filepath.name
+            )
+            continue
         kwargs = build_normalize_kwargs(args.normalize_args, probe)
         if normalize_file(filepath, kwargs, output_dir=args.output):
             success += 1
