@@ -24,9 +24,11 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from ffmpeg_normalize import FFmpegNormalize  # pyright: ignore[reportMissingImports]
+from ffmpeg_normalize import (  # pyright: ignore[reportMissingImports]
+    FFmpegNormalize,  # pyright: ignore[reportUnknownVariableType]
+)
 from yt_dlp_plugins.postprocessor.audio_normalize import (  # pyright: ignore[reportMissingImports,reportMissingTypeStubs]
-    AudioNormalizePP,
+    AudioNormalizePP,  # pyright: ignore[reportUnknownVariableType]
 )
 
 if TYPE_CHECKING:
@@ -207,7 +209,7 @@ def build_normalize_kwargs(
     param_map = AudioNormalizePP._build_param_map()  # noqa: SLF001  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
     args_iter = iter(cli_args)
     for key in args_iter:
-        mapping = param_map.get(key)  # pyright: ignore[reportUnknownMemberType]
+        mapping = param_map.get(key)  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
         if not mapping:
             continue
         param_name, param_type = mapping  # pyright: ignore[reportUnknownVariableType]
@@ -264,9 +266,9 @@ def _normalize_to_dir(
     """出力ディレクトリに正規化結果を書き出す"""
     output_path = str(output_dir / filepath.name)
     try:
-        norm = FFmpegNormalize(**kwargs)
-        norm.add_media_file(str(filepath), output_path)
-        norm.run_normalization()
+        norm = FFmpegNormalize(**kwargs)  # pyright: ignore[reportUnknownVariableType]
+        norm.add_media_file(str(filepath), output_path)  # pyright: ignore[reportUnknownMemberType]
+        norm.run_normalization()  # pyright: ignore[reportUnknownMemberType]
         logger.info("正規化が完了しました: %s", filepath.name)
     except Exception:
         logger.exception("正規化に失敗しました: %s", filepath.name)
@@ -287,9 +289,9 @@ def _normalize_overwrite(
         return False
 
     try:
-        norm = FFmpegNormalize(**kwargs)
-        norm.add_media_file(str(filepath), tmp_path)
-        norm.run_normalization()
+        norm = FFmpegNormalize(**kwargs)  # pyright: ignore[reportUnknownVariableType]
+        norm.add_media_file(str(filepath), tmp_path)  # pyright: ignore[reportUnknownMemberType]
+        norm.run_normalization()  # pyright: ignore[reportUnknownMemberType]
         shutil.move(tmp_path, str(filepath))
         logger.info("正規化が完了しました: %s", filepath.name)
     except Exception:
