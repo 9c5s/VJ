@@ -141,6 +141,15 @@ class TestProbeMedia:
             result = probe_media(Path("test.webm"))
         assert result["audio_codec"] == "libopus"
 
+    def test_returns_empty_dict_on_invalid_json(self) -> None:
+        """ffprobeの出力が不正なJSONの場合は空辞書を返す"""
+        with patch("audio_normalize.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="not valid json"
+            )
+            result = probe_media(Path("test.mp4"))
+        assert result == {}
+
     def test_missing_bitrate_excluded_from_result(self) -> None:
         """ビットレート情報がない場合はaudio_bitrateキーを含まない"""
         ffprobe_output = json.dumps({
@@ -213,6 +222,24 @@ class TestBuildNormalizeKwargs:
         result = build_normalize_kwargs(["--dual-mono"], {})
         assert result["dual_mono"] is True
 
+    def test_unknown_flag_is_ignored(self) -> None:
+        """不明なフラグは無視され、他の引数に影響しない"""
+        result = build_normalize_kwargs(["--unknown-flag", "-t", "-20.0"], {})
+        assert result["target_level"] == -20.0
+        assert "unknown-flag" not in result
+
+    def test_missing_value_after_flag_is_skipped(self) -> None:
+        """値を要求するフラグの後に値がない場合、そのフラグはスキップされる"""
+        result = build_normalize_kwargs(["-t"], {})
+        # -t (target_level) の値がないため、固定デフォルトが維持される
+        assert result["target_level"] == -14.0
+
+    def test_invalid_value_type_is_skipped(self) -> None:
+        """型変換に失敗する値が渡された場合、そのフラグはスキップされる"""
+        result = build_normalize_kwargs(["-t", "not_a_number"], {})
+        # 変換失敗のため、固定デフォルトが維持される
+        assert result["target_level"] == -14.0
+
 
 class TestNormalizeFile:
     """normalize_file: ファイルの音量を正規化する"""
@@ -271,6 +298,14 @@ class TestNormalizeFile:
         # 元ファイル以外の一時ファイルが残っていないことを確認
         remaining = list(tmp_path.iterdir())
         assert remaining == [f]
+
+    def test_returns_false_when_temp_file_creation_fails(self, tmp_path: Path) -> None:
+        """一時ファイルの作成に失敗した場合はFalseを返す"""
+        f = tmp_path / "test.mp3"
+        f.write_bytes(b"original")
+        with patch("audio_normalize.tempfile.mkstemp", side_effect=OSError("no space")):
+            result = normalize_file(f, {"target_level": -14.0})
+        assert result is False
 
 
 class TestParseArgs:
@@ -344,7 +379,7 @@ class TestMain:
     def test_succeeds_when_all_files_normalized(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """全ファイルが成功した場合、正常に終了する"""
+        """全ファイルが成功した場合、SystemExitを送出せず正常に終了する"""
         f = tmp_path / "test.mp3"
         f.write_bytes(b"data")
         monkeypatch.setattr(sys, "argv", ["audio_normalize.py", str(f)])
@@ -352,7 +387,8 @@ class TestMain:
             patch("audio_normalize.probe_media", return_value={}),
             patch("audio_normalize.normalize_file", return_value=True),
         ):
-            main()  # SystemExitが発生しなければ成功
+            result = main()
+        assert result is None
 
     def test_creates_output_directory(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
