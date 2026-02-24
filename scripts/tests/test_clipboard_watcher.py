@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
-def _make_poll_fn(sequence: list[str]):
+def _make_poll_fn(sequence: list[str]) -> MagicMock:
     """テスト用poll関数を作成する
 
     sequenceの値を順に返し、枯渇後は最後の値を返し続ける
