@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from audio_normalize import (
     FIXED_DEFAULTS,  # noqa: F401
     build_normalize_kwargs,
     collect_files,
     normalize_file,
+    parse_args,
     probe_media,
 )
 
@@ -254,3 +257,44 @@ class TestNormalizeFile:
         """存在しないファイルに対してはFalseを返す"""
         result = normalize_file(tmp_path / "no.mp3", {"target_level": -14.0})
         assert result is False
+
+
+class TestParseArgs:
+    """parse_args: コマンドライン引数を解析する"""
+
+    def test_single_file_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """単一ファイルパスを解析できる"""
+        monkeypatch.setattr(sys, "argv", ["audio_normalize.py", "test.mp3"])
+        args = parse_args()
+        assert args.paths == [Path("test.mp3")]
+        assert args.output is None
+        assert args.normalize_args == []
+
+    def test_multiple_paths(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """複数パスを解析できる"""
+        monkeypatch.setattr(
+            sys, "argv", ["audio_normalize.py", "a.mp3", "b/", "c.flac"]
+        )
+        args = parse_args()
+        assert args.paths == [Path("a.mp3"), Path("b/"), Path("c.flac")]
+
+    def test_output_option(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--outputオプションを解析できる"""
+        monkeypatch.setattr(
+            sys, "argv", ["audio_normalize.py", "--output", "/tmp/out", "test.mp3"]
+        )
+        args = parse_args()
+        assert args.output == Path("/tmp/out")
+
+    def test_normalize_args_after_separator(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """-- 以降の引数がnormalize_argsに格納される"""
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["audio_normalize.py", "test.mp3", "--", "-c:a", "aac", "-b:a", "256k"],
+        )
+        args = parse_args()
+        assert args.paths == [Path("test.mp3")]
+        assert args.normalize_args == ["-c:a", "aac", "-b:a", "256k"]
