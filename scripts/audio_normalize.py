@@ -392,7 +392,11 @@ def _validate_output_dir(output: Path | None) -> None:
     if output.exists() and not output.is_dir():
         logger.error("--output はディレクトリを指定してください: %s", output)
         sys.exit(1)
-    output.mkdir(parents=True, exist_ok=True)
+    try:
+        output.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        logger.exception("出力ディレクトリを作成できませんでした: %s", output)
+        sys.exit(1)
 
 
 def _process_single_file(
