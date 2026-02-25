@@ -9,8 +9,6 @@
   - DownloadQueue: URL用FIFOキューと重複排除
 """
 
-from __future__ import annotations
-
 import sys
 import threading
 import time

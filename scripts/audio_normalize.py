@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.13"
+# requires-python = ">=3.14"
 # dependencies = [
 #     "ffmpeg-normalize",
 #     "yt-dlp-audio-normalize>=0.3.0",
@@ -10,8 +10,6 @@
 ファイルやフォルダに対してffmpeg-normalizeを適用する
 CLI引数とドラッグ&ドロップの両方に対応する
 """
-
-from __future__ import annotations
 
 import argparse
 import json
@@ -146,14 +144,14 @@ def _extract_audio_defaults(audio_stream: dict[str, Any]) -> dict[str, Any]:
     if sample_rate is not None:
         try:
             defaults["sample_rate"] = int(sample_rate)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             logger.warning("sample_rateの変換に失敗しました: %s", sample_rate)
 
     bit_rate = audio_stream.get("bit_rate")
     if bit_rate is not None:
         try:
             defaults["audio_bitrate"] = f"{int(bit_rate) // 1000}k"
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             logger.warning("bit_rateの変換に失敗しました: %s", bit_rate)
 
     return defaults
@@ -187,7 +185,7 @@ def probe_media(filepath: Path) -> dict[str, Any] | None:
             check=False,
             timeout=30,
         )
-    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+    except FileNotFoundError, OSError, subprocess.TimeoutExpired:
         logger.warning("ffprobeの実行に失敗しました: %s", filepath, exc_info=True)
         return None
 
@@ -383,6 +381,61 @@ def setup_logger() -> None:
     logger.setLevel(logging.INFO)
 
 
+def _validate_output_dir(output: Path | None) -> None:
+    """出力ディレクトリのバリデーションと作成を行う
+
+    Args:
+        output: 出力ディレクトリのパス (Noneの場合は何もしない)
+    """
+    if output is None:
+        return
+    if output.exists() and not output.is_dir():
+        logger.error("--output はディレクトリを指定してください: %s", output)
+        sys.exit(1)
+    output.mkdir(parents=True, exist_ok=True)
+
+
+def _process_single_file(
+    filepath: Path,
+    normalize_args: list[str],
+    output_dir: Path | None,
+    seen_outputs: dict[Path, Path],
+) -> bool | None:
+    """単一ファイルの正規化処理を実行する
+
+    Args:
+        filepath: 入力ファイルのパス
+        normalize_args: ffmpeg-normalizeに渡す追加引数
+        output_dir: 出力ディレクトリ (Noneの場合は上書き)
+        seen_outputs: 出力先パスの衝突検出用辞書 (副作用で更新される)
+
+    Returns:
+        True: 成功, False: 失敗, None: スキップ
+    """
+    probe = probe_media(filepath)
+    if probe is None:
+        return False
+    if not probe:
+        logger.info("音声ストリームが存在しません スキップします: %s", filepath.name)
+        return None
+    kwargs = build_normalize_kwargs(normalize_args, probe)
+
+    if output_dir is not None:
+        ext = kwargs.get("extension", filepath.suffix.lstrip("."))
+        output_path = (output_dir / f"{filepath.stem}.{ext}").resolve()
+        if output_path in seen_outputs:
+            logger.error(
+                "出力先が重複しています: %s と %s -> %s",
+                seen_outputs[output_path],
+                filepath,
+                output_path,
+            )
+            return False
+        seen_outputs[output_path] = filepath
+
+    return normalize_file(filepath, kwargs, output_dir=output_dir)
+
+
 def main() -> None:
     """メインエントリポイント
 
@@ -397,12 +450,7 @@ def main() -> None:
         logger.error("処理対象のファイルが見つかりませんでした")
         sys.exit(1)
 
-    if args.output is not None:
-        if args.output.exists() and not args.output.is_dir():
-            logger.error("--output はディレクトリを指定してください: %s", args.output)
-            sys.exit(1)
-        args.output.mkdir(parents=True, exist_ok=True)
-
+    _validate_output_dir(args.output)
     logger.info("処理対象: %d件", len(files))
 
     success = 0
@@ -411,34 +459,12 @@ def main() -> None:
     seen_outputs: dict[Path, Path] = {}
 
     for filepath in files:
-        probe = probe_media(filepath)
-        if probe is None:
-            fail += 1
-            continue
-        if not probe:
-            logger.info(
-                "音声ストリームが存在しません スキップします: %s", filepath.name
-            )
-            continue
-        kwargs = build_normalize_kwargs(args.normalize_args, probe)
-
-        if args.output is not None:
-            ext = kwargs.get("extension", filepath.suffix.lstrip("."))
-            output_path = (args.output / f"{filepath.stem}.{ext}").resolve()
-            if output_path in seen_outputs:
-                logger.error(
-                    "出力先が重複しています: %s と %s -> %s",
-                    seen_outputs[output_path],
-                    filepath,
-                    output_path,
-                )
-                fail += 1
-                continue
-            seen_outputs[output_path] = filepath
-
-        if normalize_file(filepath, kwargs, output_dir=args.output):
+        result = _process_single_file(
+            filepath, args.normalize_args, args.output, seen_outputs
+        )
+        if result is True:
             success += 1
-        else:
+        elif result is False:
             fail += 1
 
     logger.info("完了: 成功 %d件, 失敗 %d件", success, fail)

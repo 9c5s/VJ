@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.13"
+# requires-python = ">=3.14"
 # dependencies = [
 #     "pyperclip",
 #     "yt-dlp>=2026.2.4",
@@ -10,8 +10,6 @@
 
 クリップボードを監視し、URLが検出された場合特定の引数でyt-dlpを実行する
 """
-
-from __future__ import annotations
 
 import argparse
 import logging
@@ -357,7 +355,7 @@ class VideoDownloader:
                 if self._normalize:
                     ydl.add_post_processor(AudioNormalizePP(), when="after_move")
                 ret = ydl.download([url])
-            if ret != 0:
+            if ret != 0:  # pyright: ignore[reportUnnecessaryComparison]
                 self._logger.error("ダウンロードがエラーで終了しました (code=%d)", ret)
             else:
                 self._logger.info("ダウンロードが正常に完了しました")
