@@ -453,6 +453,49 @@ class TestMain:
             main()
         assert output_dir.exists()
 
+    def test_exits_with_error_when_output_is_existing_file(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """--output に既存ファイルを指定した場合、exit code 1で終了する"""
+        f = tmp_path / "test.mp3"
+        f.write_bytes(b"data")
+        existing_file = tmp_path / "not_a_dir"
+        existing_file.write_bytes(b"file")
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["audio_normalize.py", "--output", str(existing_file), str(f)],
+        )
+        with pytest.raises(SystemExit, match="1"):
+            main()
+
+    def test_fails_on_duplicate_output_paths(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """異なるディレクトリの同名ファイルが出力先で衝突する場合、失敗扱いになる"""
+        dir_a = tmp_path / "a"
+        dir_b = tmp_path / "b"
+        dir_a.mkdir()
+        dir_b.mkdir()
+        f1 = dir_a / "song.mp3"
+        f2 = dir_b / "song.mp3"
+        f1.write_bytes(b"data1")
+        f2.write_bytes(b"data2")
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["audio_normalize.py", "--output", str(output_dir), str(f1), str(f2)],
+        )
+        probe = {"audio_codec": "aac", "sample_rate": 48000}
+        with (
+            patch("audio_normalize.probe_media", return_value=probe),
+            patch("audio_normalize.normalize_file", return_value=True),
+            pytest.raises(SystemExit, match="1"),
+        ):
+            main()
+
     def test_skips_files_without_audio_stream(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
