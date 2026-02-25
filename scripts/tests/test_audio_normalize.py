@@ -101,12 +101,12 @@ class TestProbeMedia:
             "audio_bitrate": "128k",
         }
 
-    def test_returns_empty_dict_on_ffprobe_failure(self) -> None:
-        """ffprobeが失敗した場合は空辞書を返す"""
+    def test_returns_none_on_ffprobe_failure(self) -> None:
+        """ffprobeが失敗した場合はNoneを返す"""
         with patch("audio_normalize.subprocess.run") as mock_run:
             mock_run.side_effect = FileNotFoundError
             result = probe_media(Path("test.mp4"))
-        assert result == {}
+        assert result is None
 
     def test_returns_empty_dict_on_no_audio_stream(self) -> None:
         """音声ストリームがない場合は空辞書を返す"""
@@ -140,14 +140,14 @@ class TestProbeMedia:
             result = probe_media(Path("test.webm"))
         assert result["audio_codec"] == "libopus"
 
-    def test_returns_empty_dict_on_invalid_json(self) -> None:
-        """ffprobeの出力が不正なJSONの場合は空辞書を返す"""
+    def test_returns_none_on_invalid_json(self) -> None:
+        """ffprobeの出力が不正なJSONの場合はNoneを返す"""
         with patch("audio_normalize.subprocess.run") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout="not valid json"
             )
             result = probe_media(Path("test.mp4"))
-        assert result == {}
+        assert result is None
 
     def test_missing_bitrate_excluded_from_result(self) -> None:
         """ビットレート情報がない場合はaudio_bitrateキーを含まない"""
@@ -461,4 +461,17 @@ class TestMain:
         f.write_bytes(b"data")
         monkeypatch.setattr(sys, "argv", ["audio_normalize.py", str(f)])
         with patch("audio_normalize.probe_media", return_value={}):
+            main()
+
+    def test_probe_failure_counts_as_fail(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """probe_mediaがNoneを返した場合、失敗としてカウントされる"""
+        f = tmp_path / "test.mp3"
+        f.write_bytes(b"data")
+        monkeypatch.setattr(sys, "argv", ["audio_normalize.py", str(f)])
+        with (
+            patch("audio_normalize.probe_media", return_value=None),
+            pytest.raises(SystemExit, match="1"),
+        ):
             main()

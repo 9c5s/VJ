@@ -159,7 +159,7 @@ def _extract_audio_defaults(audio_stream: dict[str, Any]) -> dict[str, Any]:
     return defaults
 
 
-def probe_media(filepath: Path) -> dict[str, Any]:
+def probe_media(filepath: Path) -> dict[str, Any] | None:
     """ffprobeで入力ファイルの音声メタデータを取得する
 
     Args:
@@ -167,7 +167,8 @@ def probe_media(filepath: Path) -> dict[str, Any]:
 
     Returns:
         audio_codec, sample_rate, audio_bitrateを含む辞書
-        取得できなかった場合は空辞書
+        音声ストリームが存在しない場合は空辞書
+        ffprobeの実行や解析に失敗した場合はNone
     """
     try:
         result = subprocess.run(
@@ -188,13 +189,13 @@ def probe_media(filepath: Path) -> dict[str, Any]:
         )
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
         logger.warning("ffprobeの実行に失敗しました: %s", filepath, exc_info=True)
-        return {}
+        return None
 
     try:
         data = json.loads(result.stdout)
     except json.JSONDecodeError:
         logger.warning("ffprobeの出力を解析できませんでした: %s", filepath)
-        return {}
+        return None
 
     audio_stream = None
     for stream in data.get("streams", []):
@@ -406,9 +407,12 @@ def main() -> None:
 
     for filepath in files:
         probe = probe_media(filepath)
+        if probe is None:
+            fail += 1
+            continue
         if not probe:
             logger.info(
-                "メディア情報を取得できませんでした スキップします: %s", filepath.name
+                "音声ストリームが存在しません スキップします: %s", filepath.name
             )
             continue
         kwargs = build_normalize_kwargs(args.normalize_args, probe)
