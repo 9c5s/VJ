@@ -365,6 +365,17 @@ class TestParseArgs:
         args = parse_args()
         assert args.output == Path("/tmp/out")
 
+    @pytest.mark.parametrize("flag", ["-o", "-O"])
+    def test_output_short_options(
+        self, monkeypatch: pytest.MonkeyPatch, flag: str
+    ) -> None:
+        """短縮オプション(-o, -O)が--outputと同じ挙動をする"""
+        monkeypatch.setattr(
+            sys, "argv", ["audio_normalize.py", flag, "/tmp/out", "test.mp3"]
+        )
+        args = parse_args()
+        assert args.output == Path("/tmp/out")
+
     def test_normalize_args_after_separator(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
