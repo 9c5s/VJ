@@ -185,7 +185,7 @@ def probe_media(filepath: Path) -> dict[str, Any] | None:
             check=False,
             timeout=30,
         )
-    except FileNotFoundError, OSError, subprocess.TimeoutExpired:
+    except OSError, subprocess.TimeoutExpired:
         logger.warning("ffprobeの実行に失敗しました: %s", filepath, exc_info=True)
         return None
 
