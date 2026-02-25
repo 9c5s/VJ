@@ -398,12 +398,17 @@ def main() -> None:
         sys.exit(1)
 
     if args.output is not None:
+        if args.output.exists() and not args.output.is_dir():
+            logger.error("--output はディレクトリを指定してください: %s", args.output)
+            sys.exit(1)
         args.output.mkdir(parents=True, exist_ok=True)
 
     logger.info("処理対象: %d件", len(files))
 
     success = 0
     fail = 0
+    # 出力先パス -> 入力元パスの対応を記録し、衝突を検出する
+    seen_outputs: dict[Path, Path] = {}
 
     for filepath in files:
         probe = probe_media(filepath)
@@ -416,6 +421,21 @@ def main() -> None:
             )
             continue
         kwargs = build_normalize_kwargs(args.normalize_args, probe)
+
+        if args.output is not None:
+            ext = kwargs.get("extension", filepath.suffix.lstrip("."))
+            output_path = (args.output / f"{filepath.stem}.{ext}").resolve()
+            if output_path in seen_outputs:
+                logger.error(
+                    "出力先が重複しています: %s と %s -> %s",
+                    seen_outputs[output_path],
+                    filepath,
+                    output_path,
+                )
+                fail += 1
+                continue
+            seen_outputs[output_path] = filepath
+
         if normalize_file(filepath, kwargs, output_dir=args.output):
             success += 1
         else:
