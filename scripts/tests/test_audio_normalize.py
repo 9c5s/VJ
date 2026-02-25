@@ -467,6 +467,24 @@ class TestMain:
         with pytest.raises(SystemExit, match="1"):
             main()
 
+    def test_exits_with_error_when_output_mkdir_fails(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """--output のディレクトリ作成がOSErrorで失敗した場合、exit code 1で終了する"""
+        f = tmp_path / "test.mp3"
+        f.write_bytes(b"data")
+        output_dir = tmp_path / "no_permission"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["audio_normalize.py", "--output", str(output_dir), str(f)],
+        )
+        with (
+            patch("pathlib.Path.mkdir", side_effect=OSError("Permission denied")),
+            pytest.raises(SystemExit, match="1"),
+        ):
+            main()
+
     def test_fails_on_duplicate_output_paths(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
