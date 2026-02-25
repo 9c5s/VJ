@@ -2,7 +2,7 @@
 # requires-python = ">=3.13"
 # dependencies = [
 #     "ffmpeg-normalize",
-#     "yt-dlp-audio-normalize",
+#     "yt-dlp-audio-normalize>=0.3.0",
 # ]
 # ///
 """音量正規化スクリプト
@@ -94,14 +94,23 @@ def collect_files(paths: Sequence[Path]) -> list[Path]:
         収集されたファイルパスのリスト
     """
     files: list[Path] = []
+    seen: set[Path] = set()
     for path in paths:
         if not path.exists():
             logger.warning("パスが存在しません: %s", path)
             continue
         if path.is_file():
-            files.append(path)
+            resolved = path.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                files.append(path)
         elif path.is_dir():
-            files.extend(sorted(p for p in path.rglob("*") if p.is_file()))
+            for p in sorted(path.rglob("*")):
+                if p.is_file():
+                    resolved = p.resolve()
+                    if resolved not in seen:
+                        seen.add(resolved)
+                        files.append(p)
     return files
 
 
@@ -334,6 +343,12 @@ def _normalize_overwrite(
 
     ext = kwargs.get("extension", filepath.suffix.lstrip("."))
     kwargs = {**kwargs, "extension": ext}
+    if ext != filepath.suffix.lstrip("."):
+        logger.warning(
+            "上書きモードでは拡張子の変更は反映されません: %s -> .%s",
+            filepath.suffix,
+            ext,
+        )
     try:
         norm = FFmpegNormalize(**kwargs)
         norm.add_media_file(str(filepath), tmp_path)
@@ -391,7 +406,7 @@ def main() -> None:
         probe = probe_media(filepath)
         if not probe:
             logger.info(
-                "音声ストリームが存在しません スキップします: %s", filepath.name
+                "メディア情報を取得できませんでした スキップします: %s", filepath.name
             )
             continue
         kwargs = build_normalize_kwargs(args.normalize_args, probe)

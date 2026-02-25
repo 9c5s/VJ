@@ -297,7 +297,8 @@ class TestNormalizeFile:
             result = normalize_file(f, {"target_level": -14.0}, output_dir=output_dir)
         assert result is True
         call_args = mock_norm.add_media_file.call_args[0]
-        assert str(output_dir) in call_args[1]
+        expected_output = str(output_dir / "test.mp3")
+        assert call_args[1] == expected_output
 
     def test_returns_false_on_normalization_error(self, tmp_path: Path) -> None:
         """正規化が失敗した場合はFalseを返す"""
@@ -440,3 +441,13 @@ class TestMain:
         ):
             main()
         assert output_dir.exists()
+
+    def test_skips_files_without_audio_stream(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """音声ストリームのないファイルはスキップされ、正常終了する"""
+        f = tmp_path / "video_only.mp4"
+        f.write_bytes(b"data")
+        monkeypatch.setattr(sys, "argv", ["audio_normalize.py", str(f)])
+        with patch("audio_normalize.probe_media", return_value={}):
+            main()
