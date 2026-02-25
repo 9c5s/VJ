@@ -67,6 +67,8 @@ def parse_args() -> ParsedArgs:
         help="正規化するファイルまたはフォルダのパス",
     )
     parser.add_argument(
+        "-o",
+        "-O",
         "--output",
         type=Path,
         default=None,
