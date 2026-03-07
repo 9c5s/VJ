@@ -121,6 +121,14 @@ _CODEC_MAP: dict[str, str] = {
 }
 
 
+def _resolve_extension(
+    kwargs: dict[str, Any], filepath: Path
+) -> tuple[str, dict[str, Any]]:
+    """kwargsからextensionを解決し、設定済みのkwargsコピーを返す"""
+    ext = kwargs.get("extension", filepath.suffix.lstrip("."))
+    return ext, {**kwargs, "extension": ext}
+
+
 def _extract_audio_defaults(audio_stream: dict[str, Any]) -> dict[str, Any]:
     """音声ストリームからFFmpegNormalizeのデフォルト値を抽出する
 
@@ -305,8 +313,7 @@ def _normalize_to_dir(
     Returns:
         正規化が成功した場合はTrue、失敗した場合はFalse
     """
-    ext = kwargs.get("extension", filepath.suffix.lstrip("."))
-    kwargs = {**kwargs, "extension": ext}
+    ext, kwargs = _resolve_extension(kwargs, filepath)
     output_path = str(output_dir / f"{filepath.stem}.{ext}")
     try:
         norm = FFmpegNormalize(**kwargs)
@@ -342,8 +349,7 @@ def _normalize_overwrite(
         logger.exception("一時ファイルの作成に失敗しました")
         return False
 
-    ext = kwargs.get("extension", filepath.suffix.lstrip("."))
-    kwargs = {**kwargs, "extension": ext}
+    ext, kwargs = _resolve_extension(kwargs, filepath)
     if ext != filepath.suffix.lstrip("."):
         logger.warning(
             "上書きモードでは拡張子の変更は反映されません: %s -> .%s",
@@ -425,7 +431,7 @@ def _process_single_file(
     kwargs = build_normalize_kwargs(normalize_args, probe)
 
     if output_dir is not None:
-        ext = kwargs.get("extension", filepath.suffix.lstrip("."))
+        ext, _ = _resolve_extension(kwargs, filepath)
         output_path = (output_dir / f"{filepath.stem}.{ext}").resolve()
         if output_path in seen_outputs:
             logger.error(
