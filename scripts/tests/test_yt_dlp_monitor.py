@@ -7,11 +7,18 @@
   - is_valid_url(): URLの有効性を判定する
   - parse_args(): コマンドライン引数の解析
   - DownloadQueue: URL用FIFOキューと重複排除
+  - ClipboardWatcher: クリップボード変更の検出
+  - VideoDownloader: yt-dlpによるダウンロード実行
+  - YtDlpMonitorApp: クリップボード監視からダウンロードまでの統合
 """
 
+import logging
 import sys
 import threading
 import time
+from pathlib import Path
+from typing import TYPE_CHECKING
+from unittest.mock import MagicMock, patch
 
 import pytest
 from yt_dlp_monitor import (
@@ -22,6 +29,48 @@ from yt_dlp_monitor import (
     merge_yt_dlp_options,
     parse_args,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from yt_dlp_monitor import VideoDownloader
+
+
+# === ヘルパー ===
+
+
+def _make_poll_fn(sequence: list[str]) -> MagicMock:
+    """テスト用poll関数を作成する
+
+    sequenceの値を順に返し、枯渇後は最後の値を返し続ける
+    """
+    it = iter(sequence)
+    last = sequence[-1]
+    return MagicMock(side_effect=lambda: next(it, last))
+
+
+class FakeDownloader:
+    """テスト用のダウンローダー"""
+
+    def __init__(self, *, fail_urls: set[str] | None = None) -> None:
+        self.downloaded: list[str] = []
+        self._fail_urls = fail_urls or set()
+
+    def download(self, url: str) -> None:
+        if url in self._fail_urls:
+            raise RuntimeError("simulated failure")
+        self.downloaded.append(url)
+
+
+class _FiniteWatcher:
+    """テスト用の有限クリップボード監視"""
+
+    def __init__(self, texts: list[str]) -> None:
+        self._texts = texts
+
+    def poll_changes(self) -> Iterator[str]:
+        yield from self._texts
+
 
 # === _parse_option_list ===
 
@@ -418,3 +467,372 @@ class TestDownloadQueue:
         dq.enqueue("https://example.com/1")
         dq.dequeue()  # ダウンロード中
         assert dq.enqueue("https://example.com/1") is None
+
+
+# === ClipboardWatcher ===
+
+
+class TestClipboardWatcher:
+    """ClipboardWatcher: クリップボード変更の検出"""
+
+    def _take(self, gen: Iterator[str], n: int) -> list[str]:
+        """ジェネレータからn個の値を取得する"""
+        results = []
+        for _, val in zip(range(n), gen):
+            results.append(val)
+        return results
+
+    def test_yields_changed_text(self) -> None:
+        """テキストが変更されるとyieldされる"""
+        from yt_dlp_monitor import ClipboardWatcher
+
+        poll_fn = _make_poll_fn(["initial", "changed"])
+        watcher = ClipboardWatcher(poll_fn=poll_fn, interval=0)
+        gen = watcher.poll_changes()
+        assert next(gen) == "changed"
+
+    def test_does_not_yield_unchanged_text(self) -> None:
+        """テキストが変更されていない場合はyieldされない"""
+        from yt_dlp_monitor import ClipboardWatcher
+
+        poll_fn = _make_poll_fn(["same", "same", "same", "different"])
+        watcher = ClipboardWatcher(poll_fn=poll_fn, interval=0)
+        gen = watcher.poll_changes()
+        assert next(gen) == "different"
+
+    def test_yields_multiple_changes_in_order(self) -> None:
+        """複数の変更がある場合、順番にyieldされる"""
+        from yt_dlp_monitor import ClipboardWatcher
+
+        poll_fn = _make_poll_fn(["a", "b", "c"])
+        watcher = ClipboardWatcher(poll_fn=poll_fn, interval=0)
+        gen = watcher.poll_changes()
+        assert self._take(gen, 2) == ["b", "c"]
+
+    def test_skips_pyperclip_exception_and_continues(self) -> None:
+        """PyperclipExceptionが発生してもスキップして監視を継続する"""
+        import pyperclip
+        from yt_dlp_monitor import ClipboardWatcher
+
+        call_count = 0
+
+        def flaky_poll() -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return "initial"
+            if call_count == 2:
+                raise pyperclip.PyperclipException("test error")
+            return "after_error"
+
+        watcher = ClipboardWatcher(poll_fn=flaky_poll, interval=0)
+        gen = watcher.poll_changes()
+        assert next(gen) == "after_error"
+
+
+# === VideoDownloader ===
+
+
+class TestVideoDownloader:
+    """VideoDownloader: yt-dlpによるダウンロード実行"""
+
+    def test_resolves_download_dir_from_options(self, tmp_path: Path) -> None:
+        """オプションの-Pからダウンロードディレクトリを解決する"""
+        from yt_dlp_monitor import VideoDownloader
+
+        dl_dir = tmp_path / "custom"
+        logger = logging.getLogger("test")
+        downloader = VideoDownloader(
+            yt_dlp_options=["-P", str(dl_dir)],
+            logger=logger,
+        )
+        assert downloader.download_dir == dl_dir
+
+    def test_resolves_default_download_dir_when_no_p_option(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """オプションに-Pがない場合、デフォルトディレクトリを使用する"""
+        import yt_dlp_monitor
+
+        fake_default = tmp_path / "yt_dlp"
+        monkeypatch.setattr(yt_dlp_monitor, "DOWNLOAD_DIR", fake_default)
+        logger = logging.getLogger("test")
+        downloader = yt_dlp_monitor.VideoDownloader(
+            yt_dlp_options=["--ignore-config"],
+            logger=logger,
+        )
+        assert downloader.download_dir == fake_default
+
+    def test_creates_download_directory(self, tmp_path: Path) -> None:
+        """コンストラクタでダウンロードディレクトリが作成される"""
+        from yt_dlp_monitor import VideoDownloader
+
+        dl_dir = tmp_path / "new_dir" / "nested"
+        logger = logging.getLogger("test")
+        VideoDownloader(
+            yt_dlp_options=["-P", str(dl_dir)],
+            logger=logger,
+        )
+        assert dl_dir.exists(), f"ディレクトリが作成されていない: {dl_dir}"
+
+
+class TestVideoDownloaderDownload:
+    """VideoDownloader.download: yt-dlpダウンロード実行の検証"""
+
+    def _make_downloader(
+        self, tmp_path: Path, *, normalize: bool = True
+    ) -> VideoDownloader:
+        """テスト用のVideoDownloaderインスタンスを生成する"""
+        from yt_dlp_monitor import VideoDownloader
+
+        dl_dir = tmp_path / "dl"
+        logger = logging.getLogger("test_download")
+        return VideoDownloader(
+            yt_dlp_options=["-P", str(dl_dir)],
+            logger=logger,
+            normalize=normalize,
+        )
+
+    def test_download_calls_yt_dlp_with_url(self, tmp_path: Path) -> None:
+        """指定URLでyt-dlpのdownloadが呼ばれる"""
+        with (
+            patch("yt_dlp.parse_options") as mock_parse_options,
+            patch("yt_dlp.YoutubeDL") as mock_ydl_cls,
+        ):
+            mock_parse_options.return_value.ydl_opts = {}
+            mock_ydl = mock_ydl_cls.return_value.__enter__.return_value
+            mock_ydl.download.return_value = 0
+
+            downloader = self._make_downloader(tmp_path)
+            downloader.download("https://example.com/video")
+
+            mock_ydl.download.assert_called_once_with(["https://example.com/video"])
+
+    def test_download_adds_audio_normalize_pp_when_normalize_is_true(
+        self, tmp_path: Path
+    ) -> None:
+        """normalize=Trueの場合、AudioNormalizePPがpost_processorに追加される"""
+        with (
+            patch("yt_dlp.parse_options") as mock_parse_options,
+            patch("yt_dlp.YoutubeDL") as mock_ydl_cls,
+        ):
+            mock_parse_options.return_value.ydl_opts = {}
+            mock_ydl = mock_ydl_cls.return_value.__enter__.return_value
+            mock_ydl.download.return_value = 0
+
+            downloader = self._make_downloader(tmp_path, normalize=True)
+            downloader.download("https://example.com/video")
+
+            mock_ydl.add_post_processor.assert_called_once()
+
+    def test_download_skips_audio_normalize_pp_when_normalize_is_false(
+        self, tmp_path: Path
+    ) -> None:
+        """normalize=Falseの場合、add_post_processorは呼ばれない"""
+        with (
+            patch("yt_dlp.parse_options") as mock_parse_options,
+            patch("yt_dlp.YoutubeDL") as mock_ydl_cls,
+        ):
+            mock_parse_options.return_value.ydl_opts = {}
+            mock_ydl = mock_ydl_cls.return_value.__enter__.return_value
+            mock_ydl.download.return_value = 0
+
+            downloader = self._make_downloader(tmp_path, normalize=False)
+            downloader.download("https://example.com/video")
+
+            mock_ydl.add_post_processor.assert_not_called()
+
+    def test_download_logs_error_on_download_error(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """DownloadError発生時にログ出力され例外は伝播しない"""
+        from yt_dlp.utils import DownloadError
+
+        with (
+            patch("yt_dlp.parse_options") as mock_parse_options,
+            patch("yt_dlp.YoutubeDL") as mock_ydl_cls,
+            caplog.at_level(logging.ERROR),
+        ):
+            mock_parse_options.return_value.ydl_opts = {}
+            mock_ydl = mock_ydl_cls.return_value.__enter__.return_value
+            mock_ydl.download.side_effect = DownloadError("test error")
+
+            downloader = self._make_downloader(tmp_path)
+            downloader.download("https://example.com/video")
+
+            assert "ダウンロードに失敗しました" in caplog.text
+
+
+# === YtDlpMonitorApp ===
+
+
+class TestYtDlpMonitorAppWorker:
+    """YtDlpMonitorApp._download_worker: キューからURLを処理する"""
+
+    def test_processes_single_url_from_queue(self) -> None:
+        """キューのURLに対してdownloader.downloadが呼ばれる"""
+        from yt_dlp_monitor import YtDlpMonitorApp
+
+        dq = DownloadQueue()
+        dq.enqueue("https://example.com/1")
+        fake = FakeDownloader()
+        logger = logging.getLogger("test_worker")
+        app = YtDlpMonitorApp(
+            watcher=None,  # type: ignore[arg-type]
+            downloader=fake,  # type: ignore[arg-type]
+            download_queue=dq,
+            logger=logger,
+        )
+        t = threading.Thread(target=app._download_worker, daemon=True)
+        t.start()
+        dq.join()
+        assert fake.downloaded == ["https://example.com/1"]
+
+    def test_processes_urls_in_fifo_order(self) -> None:
+        """複数URLがFIFO順で処理される"""
+        from yt_dlp_monitor import YtDlpMonitorApp
+
+        dq = DownloadQueue()
+        dq.enqueue("https://example.com/1")
+        dq.enqueue("https://example.com/2")
+        dq.enqueue("https://example.com/3")
+        fake = FakeDownloader()
+        logger = logging.getLogger("test_worker")
+        app = YtDlpMonitorApp(
+            watcher=None,  # type: ignore[arg-type]
+            downloader=fake,  # type: ignore[arg-type]
+            download_queue=dq,
+            logger=logger,
+        )
+        t = threading.Thread(target=app._download_worker, daemon=True)
+        t.start()
+        dq.join()
+        assert fake.downloaded == [
+            "https://example.com/1",
+            "https://example.com/2",
+            "https://example.com/3",
+        ]
+
+    def test_marks_done_after_download(self) -> None:
+        """ダウンロード後にmark_doneが呼ばれ、再enqueueできる"""
+        from yt_dlp_monitor import YtDlpMonitorApp
+
+        dq = DownloadQueue()
+        dq.enqueue("https://example.com/1")
+        fake = FakeDownloader()
+        logger = logging.getLogger("test_worker")
+        app = YtDlpMonitorApp(
+            watcher=None,  # type: ignore[arg-type]
+            downloader=fake,  # type: ignore[arg-type]
+            download_queue=dq,
+            logger=logger,
+        )
+        t = threading.Thread(target=app._download_worker, daemon=True)
+        t.start()
+        dq.join()
+        assert dq.enqueue("https://example.com/1") is not None
+
+    def test_continues_after_downloader_raises_exception(self) -> None:
+        """ダウンローダーが例外を送出してもワーカーは停止せず次のURLを処理する"""
+        from yt_dlp_monitor import YtDlpMonitorApp
+
+        dq = DownloadQueue()
+        dq.enqueue("https://example.com/fail")
+        dq.enqueue("https://example.com/ok")
+        fake = FakeDownloader(fail_urls={"https://example.com/fail"})
+        logger = logging.getLogger("test_worker")
+        app = YtDlpMonitorApp(
+            watcher=None,  # type: ignore[arg-type]
+            downloader=fake,  # type: ignore[arg-type]
+            download_queue=dq,
+            logger=logger,
+        )
+        t = threading.Thread(target=app._download_worker, daemon=True)
+        t.start()
+        dq.join()
+        assert fake.downloaded == ["https://example.com/ok"]
+        # 失敗したURLもmark_doneされ再enqueue可能
+        assert dq.enqueue("https://example.com/fail") is not None
+
+
+class TestYtDlpMonitorAppRun:
+    """YtDlpMonitorApp.run: クリップボード監視からダウンロードまでの統合テスト"""
+
+    def test_valid_urls_are_enqueued_and_downloaded(self) -> None:
+        """有効なURLがキューに追加されダウンロードされる"""
+        from yt_dlp_monitor import YtDlpMonitorApp
+
+        dq = DownloadQueue()
+        fake = FakeDownloader()
+        logger = logging.getLogger("test_run")
+        app = YtDlpMonitorApp(
+            watcher=_FiniteWatcher(  # type: ignore[arg-type]
+                [
+                    "https://example.com/video1",
+                    "not-a-url",
+                    "https://example.com/video2",
+                ]
+            ),
+            downloader=fake,  # type: ignore[arg-type]
+            download_queue=dq,
+            logger=logger,
+        )
+        app.run()
+        dq.join()
+        assert fake.downloaded == [
+            "https://example.com/video1",
+            "https://example.com/video2",
+        ]
+
+    def test_duplicate_urls_are_not_downloaded_twice(self) -> None:
+        """重複URLは2回ダウンロードされない
+
+        ワーカーのdownloadをEventでブロックし、run()が全URLを処理した後に
+        解放することで、enqueueの重複排除が確実にテストされる
+        """
+        from yt_dlp_monitor import YtDlpMonitorApp
+
+        dq = DownloadQueue()
+        proceed = threading.Event()
+
+        class BlockingDownloader(FakeDownloader):
+            def download(self, url: str) -> None:
+                proceed.wait()
+                super().download(url)
+
+        fake = BlockingDownloader()
+        logger = logging.getLogger("test_run")
+        app = YtDlpMonitorApp(
+            watcher=_FiniteWatcher(  # type: ignore[arg-type]
+                [
+                    "https://example.com/video1",
+                    "https://example.com/video1",
+                ]
+            ),
+            downloader=fake,  # type: ignore[arg-type]
+            download_queue=dq,
+            logger=logger,
+        )
+        app.run()
+        proceed.set()
+        dq.join()
+        assert fake.downloaded == ["https://example.com/video1"]
+
+    def test_non_url_text_is_ignored(self) -> None:
+        """URL以外のテキストはダウンロードされない"""
+        from yt_dlp_monitor import YtDlpMonitorApp
+
+        dq = DownloadQueue()
+        fake = FakeDownloader()
+        logger = logging.getLogger("test_run")
+        app = YtDlpMonitorApp(
+            watcher=_FiniteWatcher(  # type: ignore[arg-type]
+                ["hello world", "ftp://not-http.com", "just text"]
+            ),
+            downloader=fake,  # type: ignore[arg-type]
+            download_queue=dq,
+            logger=logger,
+        )
+        app.run()
+        dq.join()
+        assert fake.downloaded == []
