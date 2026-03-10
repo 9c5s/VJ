@@ -7,6 +7,11 @@ pre-commit:
     - name: ignored-files
       run: "! git check-ignore {staged_files}"
 
+    - name: gitignore-sort
+      glob: .gitignore
+      run: grep -v '^#\|^$' {staged_files} | LC_ALL=C sort -uo {staged_files}
+      stage_fixed: true
+
     - name: lefthook
       glob: lefthook.yml
       run: uvx lefthook validate
