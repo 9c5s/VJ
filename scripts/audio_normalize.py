@@ -10,6 +10,26 @@
 CLI引数とドラッグ&ドロップの両方に対応する
 """
 
+
+def _ensure_dependencies() -> None:
+    """D&D実行時に依存パッケージが未解決なら uv run で再起動する
+
+    python.exeから直接実行された場合、PEP 723メタデータに基づき
+    uv runで依存を解決して再実行する
+    """
+    from importlib.util import find_spec  # noqa: PLC0415
+
+    if find_spec("ffmpeg_normalize") is not None:
+        return
+
+    import subprocess  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+
+    raise SystemExit(subprocess.call(["uv", "run", __file__, *sys.argv[1:]]))
+
+
+_ensure_dependencies()
+
 import argparse
 import json
 import logging
