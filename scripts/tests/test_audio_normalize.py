@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import logging
 import subprocess
 import sys
 from pathlib import Path
@@ -169,6 +170,34 @@ class TestProbeMedia:
             result = probe_media(Path("test.flac"))
         assert result is not None
         assert "audio_bitrate" not in result
+
+    def test_non_numeric_sample_rate_excluded_from_result(self) -> None:
+        """sample_rateが非数値の場合はsample_rateキーを含まない"""
+        ffprobe_output = json.dumps({
+            "streams": [
+                {
+                    "codec_type": "audio",
+                    "codec_name": "aac",
+                    "sample_rate": "invalid_value",
+                }
+            ],
+            "format": {"format_name": "mp4"},
+        })
+        with patch("audio_normalize.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout=ffprobe_output
+            )
+            result = probe_media(Path("test.mp4"))
+        assert result is not None
+        assert "sample_rate" not in result
+        assert result["audio_codec"] == "aac"
+
+    def test_returns_none_on_timeout(self) -> None:
+        """ffprobeがタイムアウトした場合はNoneを返す"""
+        with patch("audio_normalize.subprocess.run") as mock_run:
+            mock_run.side_effect = subprocess.TimeoutExpired(cmd="ffprobe", timeout=30)
+            result = probe_media(Path("test.mp4"))
+        assert result is None
 
     def test_non_numeric_bitrate_excluded_from_result(self) -> None:
         """bit_rateが'N/A'など非数値の場合はaudio_bitrateキーを含まない"""
@@ -339,6 +368,38 @@ class TestNormalizeFile:
         with patch("audio_normalize.tempfile.mkstemp", side_effect=OSError("no space")):
             result = normalize_file(f, {"target_level": -14.0})
         assert result is False
+
+    def test_returns_false_when_normalization_fails_with_output_dir(
+        self, tmp_path: Path
+    ) -> None:
+        """output_dir指定時、正規化失敗でFalseを返す"""
+        f = tmp_path / "test.mp3"
+        f.write_bytes(b"original")
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        with patch("audio_normalize.FFmpegNormalize") as mock_cls:
+            mock_norm = MagicMock()
+            mock_norm.run_normalization.side_effect = Exception("ffmpeg error")
+            mock_cls.return_value = mock_norm
+            result = normalize_file(f, {"target_level": -14.0}, output_dir=output_dir)
+        assert result is False
+
+    def test_warns_on_extension_change_in_overwrite_mode(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """上書きモードで拡張子変更が指定された場合、警告ログを出力する"""
+        f = tmp_path / "test.mp3"
+        f.write_bytes(b"original")
+        with (
+            patch("audio_normalize.FFmpegNormalize") as mock_cls,
+            patch("audio_normalize.shutil.move"),
+            caplog.at_level(logging.WARNING, logger="audio_normalize"),
+        ):
+            mock_norm = MagicMock()
+            mock_cls.return_value = mock_norm
+            result = normalize_file(f, {"target_level": -14.0, "extension": "aac"})
+        assert result is True
+        assert "拡張子の変更は反映されません" in caplog.text
 
 
 class TestParseArgs:
