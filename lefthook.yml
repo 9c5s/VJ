@@ -34,8 +34,8 @@ pre-commit:
     - name: ruff
       glob: 'scripts/**/*.{py,pyi}'
       run: >
-        uvx ruff format {staged_files} &&
-        uvx ruff check --fix {staged_files}
+        uvx ruff check --fix {staged_files} &&
+        uvx ruff format {staged_files}
       stage_fixed: true
 
     - name: pyright
