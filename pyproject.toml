@@ -31,31 +31,7 @@ line-length = 88
 indent-width = 4
 preview = true
 include = ["*.py", "*.pyi", "**/pyproject.toml"]
-exclude = [
-  ".bzr",
-  ".direnv",
-  ".eggs",
-  ".git",
-  ".git-rewrite",
-  ".hg",
-  ".mypy_cache",
-  ".nox",
-  ".pants.d",
-  ".pytype",
-  ".ruff_cache",
-  ".svn",
-  ".tox",
-  ".venv",
-  "__pypackages__",
-  "_build",
-  "buck-out",
-  "build",
-  "dist",
-  "node_modules",
-  "venv",
-  ".vscode",
-  ".idea",
-]
+extend-exclude = [".vscode", ".idea"]
 respect-gitignore = true
 show-fixes = true
 output-format = "full"
@@ -245,12 +221,7 @@ keep-runtime-typing = true
   "TC003",
   "B905",
 ]
-"**/migrations/**/*.py" = ["ALL"]
-"conf.py" = ["D100"]
-"setup.py" = ["D", "ANN"]
-"docs/conf.py" = ["D100", "A001"]
 "scripts/**/*.py" = ["S603", "S607"]
-"experimental/**/*.py" = ["ERA001", "FIX002", "PLR2004", "S101"]
 
 [tool.uv]
 package = false
