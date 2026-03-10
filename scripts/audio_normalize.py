@@ -1,7 +1,6 @@
 # /// script
 # requires-python = ">=3.14"
 # dependencies = [
-#     "ffmpeg-normalize",
 #     "yt-dlp-audio-normalize>=0.3.0",
 # ]
 # ///
