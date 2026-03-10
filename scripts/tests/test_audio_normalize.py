@@ -1,5 +1,6 @@
 """audio_normalize.py のテスト"""
 
+import importlib.util
 import json
 import subprocess
 import sys
@@ -8,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from audio_normalize import (
+    _ensure_dependencies,  # pyright: ignore[reportPrivateUsage]
     build_normalize_kwargs,
     collect_files,
     main,
@@ -537,3 +539,63 @@ class TestMain:
             pytest.raises(SystemExit, match="1"),
         ):
             main()
+
+
+class TestEnsureDependencies:
+    """_ensure_dependencies: D&D実行時の依存解決"""
+
+    def test_does_nothing_when_dependency_is_available(self) -> None:
+        """依存パッケージがインストール済みの場合は何もしない"""
+        _ensure_dependencies()  # SystemExitが送出されないこと
+
+    def test_reruns_via_uv_when_dependency_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """依存パッケージが未インストールの場合uv runで再実行する
+
+        SystemExitを送出することを確認する
+        """
+        import audio_normalize
+
+        original_find_spec = importlib.util.find_spec
+
+        def selective_find_spec(name: str, package: str | None = None) -> object:
+            if name == "ffmpeg_normalize":
+                return None
+            return original_find_spec(name, package)
+
+        monkeypatch.setattr(sys, "argv", ["audio_normalize.py", "file1.mp3", "dir/"])
+
+        with (
+            patch("importlib.util.find_spec", side_effect=selective_find_spec),
+            patch("subprocess.call", return_value=0) as mock_call,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            _ensure_dependencies()
+
+        assert exc_info.value.code == 0
+        args = mock_call.call_args[0][0]
+        assert args[:2] == ["uv", "run"]
+        assert args[2] == audio_normalize.__file__
+        assert args[3:] == ["file1.mp3", "dir/"]
+
+    def test_propagates_uv_run_exit_code(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """終了コードをSystemExitで伝播する"""
+        original_find_spec = importlib.util.find_spec
+
+        def selective_find_spec(name: str, package: str | None = None) -> object:
+            if name == "ffmpeg_normalize":
+                return None
+            return original_find_spec(name, package)
+
+        monkeypatch.setattr(sys, "argv", ["audio_normalize.py", "test.mp3"])
+
+        with (
+            patch("importlib.util.find_spec", side_effect=selective_find_spec),
+            patch("subprocess.call", return_value=1) as mock_call,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            _ensure_dependencies()
+
+        assert exc_info.value.code == 1
+        mock_call.assert_called_once()
