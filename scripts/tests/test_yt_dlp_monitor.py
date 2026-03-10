@@ -1,3 +1,5 @@
+# テストから内部APIを直接検証するため抑制
+# pyright: reportPrivateUsage=false
 """yt_dlp_monitor.py のテスト
 
 対象:
@@ -435,7 +437,7 @@ class TestClipboardWatcher:
 
     def _take(self, gen: Iterator[str], n: int) -> list[str]:
         """ジェネレータからn個の値を取得する"""
-        results = []
+        results: list[str] = []
         for _, val in zip(range(n), gen):
             results.append(val)
         return results

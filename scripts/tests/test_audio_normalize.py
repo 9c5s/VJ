@@ -136,6 +136,7 @@ class TestProbeMedia:
                 args=[], returncode=0, stdout=ffprobe_output
             )
             result = probe_media(Path("test.webm"))
+        assert result is not None
         assert result["audio_codec"] == "libopus"
 
     def test_returns_none_on_invalid_json(self) -> None:
@@ -164,6 +165,7 @@ class TestProbeMedia:
                 args=[], returncode=0, stdout=ffprobe_output
             )
             result = probe_media(Path("test.flac"))
+        assert result is not None
         assert "audio_bitrate" not in result
 
     def test_non_numeric_bitrate_excluded_from_result(self) -> None:
@@ -184,6 +186,7 @@ class TestProbeMedia:
                 args=[], returncode=0, stdout=ffprobe_output
             )
             result = probe_media(Path("test.webm"))
+        assert result is not None
         assert "audio_bitrate" not in result
         assert result["sample_rate"] == 48000
 
