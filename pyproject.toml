@@ -216,7 +216,6 @@ keep-runtime-typing = true
   "B905",
 ]
 "scripts/**/*.py" = ["S603", "S607"]
-"scripts/audio_normalize.py" = ["S603", "S607", "E402"]
 
 [tool.uv]
 package = false
