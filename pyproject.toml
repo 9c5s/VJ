@@ -14,5 +14,11 @@ dev = [
   "pytest>=8",
 ]
 
+[tool.pyright]
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+extraPaths = ["scripts"]
+
 [tool.uv]
 package = false
