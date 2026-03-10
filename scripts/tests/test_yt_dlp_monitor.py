@@ -438,7 +438,7 @@ class TestClipboardWatcher:
     def _take(self, gen: Iterator[str], n: int) -> list[str]:
         """ジェネレータからn個の値を取得する"""
         results: list[str] = []
-        for _, val in zip(range(n), gen):
+        for _, val in zip(range(n), gen, strict=False):
             results.append(val)
         return results
 
