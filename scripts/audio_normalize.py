@@ -193,8 +193,7 @@ def probe_media(filepath: Path) -> dict[str, Any] | None:
 
     Returns:
         audio_codec, sample_rate, audio_bitrateを含む辞書
-        音声ストリームが存在しない場合は空辞書
-        ffprobeの実行や解析に失敗した場合はNone
+        音声ストリームが存在しない場合やffprobeの実行/解析に失敗した場合はNone
     """
     try:
         result = subprocess.run(
@@ -231,7 +230,7 @@ def probe_media(filepath: Path) -> dict[str, Any] | None:
 
     if audio_stream is None:
         logger.warning("音声ストリームが見つかりませんでした: %s", filepath)
-        return {}
+        return None
 
     return _extract_audio_defaults(audio_stream)
 
@@ -445,9 +444,6 @@ def _process_single_file(
     probe = probe_media(filepath)
     if probe is None:
         return False
-    if not probe:
-        logger.info("音声ストリームが存在しません スキップします: %s", filepath.name)
-        return None
     kwargs = build_normalize_kwargs(normalize_args, probe)
 
     if output_dir is not None:

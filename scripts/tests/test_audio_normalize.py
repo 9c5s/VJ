@@ -109,8 +109,8 @@ class TestProbeMedia:
             result = probe_media(Path("test.mp4"))
         assert result is None
 
-    def test_returns_empty_dict_on_no_audio_stream(self) -> None:
-        """音声ストリームがない場合は空辞書を返す"""
+    def test_returns_none_on_no_audio_stream(self) -> None:
+        """音声ストリームがない場合はNoneを返す"""
         ffprobe_output = json.dumps({
             "streams": [{"codec_type": "video", "codec_name": "h264"}],
             "format": {"format_name": "mp4"},
@@ -120,7 +120,7 @@ class TestProbeMedia:
                 args=[], returncode=0, stdout=ffprobe_output
             )
             result = probe_media(Path("test.mp4"))
-        assert result == {}
+        assert result is None
 
     def test_codec_map_converts_opus_to_libopus(self) -> None:
         """opusコーデックはlibopusに変換される"""
@@ -578,14 +578,17 @@ class TestMain:
         ):
             main()
 
-    def test_skips_files_without_audio_stream(
+    def test_fails_on_files_without_audio_stream(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """音声ストリームのないファイルはスキップされ、正常終了する"""
+        """音声ストリームのないファイルは失敗としてカウントされる"""
         f = tmp_path / "video_only.mp4"
         f.write_bytes(b"data")
         monkeypatch.setattr(sys, "argv", ["audio_normalize.py", str(f)])
-        with patch("audio_normalize.probe_media", return_value={}):
+        with (
+            patch("audio_normalize.probe_media", return_value=None),
+            pytest.raises(SystemExit, match="1"),
+        ):
             main()
 
     def test_probe_failure_counts_as_fail(
