@@ -106,13 +106,6 @@ allow-dict-calls-with-keyword-arguments = false
 [tool.ruff.lint.flake8-errmsg]
 max-string-length = 30
 
-[tool.ruff.lint.flake8-import-conventions.aliases]
-"numpy" = "np"
-"pandas" = "pd"
-"matplotlib.pyplot" = "plt"
-"seaborn" = "sns"
-"tensorflow" = "tf"
-
 [tool.ruff.lint.flake8-pytest-style]
 fixture-parentheses = true
 mark-parentheses = true
