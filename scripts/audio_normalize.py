@@ -115,22 +115,23 @@ def collect_files(paths: Sequence[Path]) -> list[Path]:
     """
     files: list[Path] = []
     seen: set[Path] = set()
+
+    def _add_if_unique(p: Path) -> None:
+        """重複を除いてファイルを追加する"""
+        resolved = p.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            files.append(p)
+
     for path in paths:
         if not path.exists():
             logger.warning("パスが存在しません: %s", path)
-            continue
-        if path.is_file():
-            resolved = path.resolve()
-            if resolved not in seen:
-                seen.add(resolved)
-                files.append(path)
+        elif path.is_file():
+            _add_if_unique(path)
         elif path.is_dir():
-            for p in sorted(path.rglob("*")):
+            for p in sorted(path.rglob("*", recurse_symlinks=False)):
                 if p.is_file():
-                    resolved = p.resolve()
-                    if resolved not in seen:
-                        seen.add(resolved)
-                        files.append(p)
+                    _add_if_unique(p)
     return files
 
 
@@ -147,6 +148,15 @@ def _resolve_extension(
     """kwargsからextensionを解決し、設定済みのkwargsコピーを返す"""
     ext = kwargs.get("extension", filepath.suffix.lstrip("."))
     return ext, {**kwargs, "extension": ext}
+
+
+def _safe_int(value: object, field_name: str) -> int | None:
+    """値をintに安全に変換する 失敗時は警告ログを出力しNoneを返す"""
+    try:
+        return int(value)  # pyright: ignore[reportArgumentType]
+    except ValueError, TypeError:
+        logger.warning("%sの変換に失敗しました: %s", field_name, value)
+        return None
 
 
 def _extract_audio_defaults(audio_stream: dict[str, Any]) -> dict[str, Any]:
@@ -170,17 +180,15 @@ def _extract_audio_defaults(audio_stream: dict[str, Any]) -> dict[str, Any]:
 
     sample_rate = audio_stream.get("sample_rate")
     if sample_rate is not None:
-        try:
-            defaults["sample_rate"] = int(sample_rate)
-        except ValueError, TypeError:
-            logger.warning("sample_rateの変換に失敗しました: %s", sample_rate)
+        parsed = _safe_int(sample_rate, "sample_rate")
+        if parsed is not None:
+            defaults["sample_rate"] = parsed
 
     bit_rate = audio_stream.get("bit_rate")
     if bit_rate is not None:
-        try:
-            defaults["audio_bitrate"] = f"{int(bit_rate) // 1000}k"
-        except ValueError, TypeError:
-            logger.warning("bit_rateの変換に失敗しました: %s", bit_rate)
+        parsed = _safe_int(bit_rate, "bit_rate")
+        if parsed is not None:
+            defaults["audio_bitrate"] = f"{parsed // 1000}k"
 
     return defaults
 
@@ -375,17 +383,21 @@ def _normalize_overwrite(
             filepath.suffix,
             ext,
         )
+    success = False
     try:
         norm = FFmpegNormalize(**kwargs)
         norm.add_media_file(str(filepath), tmp_path)
         norm.run_normalization()
         shutil.move(tmp_path, str(filepath))
+        success = True
     except Exception:
         logger.exception("正規化に失敗しました: %s", filepath.name)
+    finally:
+        # shutil.move成功後はtmp_pathが存在しないためmissing_ok=Trueで安全
         Path(tmp_path).unlink(missing_ok=True)
-        return False
-    logger.info("正規化が完了しました: %s", filepath.name)
-    return True
+    if success:
+        logger.info("正規化が完了しました: %s", filepath.name)
+    return success
 
 
 def setup_logger() -> None:
