@@ -4,6 +4,13 @@ no_tty: true
 pre-commit:
   parallel: true
   jobs:
+    - name: protect-branch
+      run: >
+        d=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null|sed s,.*/,,)&&
+        [ $(git symbolic-ref --short HEAD) = $d ]&&
+        echo Direct commits to $d are not allowed. Use a feature branch.&&
+        exit 1;true
+
     - name: ignored-files
       run: "! git check-ignore {staged_files}"
 
