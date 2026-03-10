@@ -1,15 +1,15 @@
 """yt_dlp_monitor.py のテスト
 
 対象:
-  - _parse_option_list(): CLIオプションリストを辞書に変換する
-  - _dict_to_option_list(): オプション辞書をリスト形式に変換する
-  - merge_yt_dlp_options(): デフォルトオプションにCLI引数をマージする
-  - is_valid_url(): URLの有効性を判定する
-  - parse_args(): コマンドライン引数の解析
-  - DownloadQueue: URL用FIFOキューと重複排除
-  - ClipboardWatcher: クリップボード変更の検出
-  - VideoDownloader: yt-dlpによるダウンロード実行
-  - YtDlpMonitorApp: クリップボード監視からダウンロードまでの統合
+- _parse_option_list(): CLIオプションリストを辞書に変換する
+- _dict_to_option_list(): オプション辞書をリスト形式に変換する
+- merge_yt_dlp_options(): デフォルトオプションにCLI引数をマージする
+- is_valid_url(): URLの有効性を判定する
+- parse_args(): コマンドライン引数の解析
+- DownloadQueue: URL用FIFOキューと重複排除
+- ClipboardWatcher: クリップボード変更の検出
+- VideoDownloader: yt-dlpによるダウンロード実行
+- YtDlpMonitorApp: クリップボード監視からダウンロードまでの統合
 """
 
 import logging
@@ -36,9 +36,6 @@ if TYPE_CHECKING:
     from yt_dlp_monitor import VideoDownloader
 
 
-# === ヘルパー ===
-
-
 def _make_poll_fn(sequence: list[str]) -> MagicMock:
     """テスト用poll関数を作成する
 
@@ -53,10 +50,12 @@ class FakeDownloader:
     """テスト用のダウンローダー"""
 
     def __init__(self, *, fail_urls: set[str] | None = None) -> None:
+        """失敗URLの集合を受け取り、ダウンロード記録を初期化する"""
         self.downloaded: list[str] = []
         self._fail_urls = fail_urls or set()
 
     def download(self, url: str) -> None:
+        """URLをダウンロードする。fail_urlsに含まれる場合はRuntimeErrorを送出する"""
         if url in self._fail_urls:
             raise RuntimeError("simulated failure")
         self.downloaded.append(url)
@@ -70,9 +69,6 @@ class _FiniteWatcher:
 
     def poll_changes(self) -> Iterator[str]:
         yield from self._texts
-
-
-# === _parse_option_list ===
 
 
 class TestParseOptionList:
@@ -94,8 +90,6 @@ class TestParseOptionList:
         result = _parse_option_list(["-f", "bv+ba"])
         assert result == {"-f": ["bv+ba"]}
 
-    # --- 複数オプション ---
-
     def test_distinct_options_each_stored_separately(self) -> None:
         """異なるオプションはそれぞれ独立したエントリとして格納される"""
         result = _parse_option_list(["-f", "bv+ba", "-S", "res:1080"])
@@ -115,8 +109,6 @@ class TestParseOptionList:
             "--verbose": None,
         }
 
-    # --- 重複キーの蓄積(変更箇所: get+Noneチェック) ---
-
     def test_duplicate_key_accumulates_values_in_order(self) -> None:
         """同一キーが複数回出現すると値が出現順にリストへ蓄積される"""
         result = _parse_option_list(["--ppa", "value1", "--ppa", "value2"])
@@ -126,8 +118,6 @@ class TestParseOptionList:
         """3回以上の重複でも全ての値が保持される"""
         result = _parse_option_list(["--ppa", "a", "--ppa", "b", "--ppa", "c"])
         assert result["--ppa"] == ["a", "b", "c"]
-
-    # --- 境界値・エッジケース ---
 
     def test_flag_at_end_of_list_stored_as_none(self) -> None:
         """リスト末尾のオプションに値がなければフラグとして扱われる"""
@@ -154,8 +144,6 @@ class TestParseOptionList:
         result = _parse_option_list(["-f", ""])
         assert result == {"-f": [""]}
 
-    # --- i+=2の正確性(M3ミューテーション対策) ---
-
     def test_key_value_pairs_parsed_without_offset_drift(self) -> None:
         """連続する値付きオプションがインデックスずれなく正しくパースされる"""
         result = _parse_option_list(["-f", "bv+ba", "-o", "%(title)s"])
@@ -170,8 +158,6 @@ class TestParseOptionList:
         assert result["-S"] == ["res:1080"]
         assert result["-f"] == ["bv+ba"]
         assert result["-P"] == ["/tmp"]
-
-    # --- 統合テスト ---
 
     def test_complex_mixed_options_parsed_correctly(self) -> None:
         """実際のYT_DLP_OPTIONSに近い複合入力が正しく解析される"""
@@ -203,13 +189,8 @@ class TestParseOptionList:
         }
 
 
-# === is_valid_url ===
-
-
 class TestIsValidUrl:
     """is_valid_url: URLの有効性を判定する"""
-
-    # --- 正常系 ---
 
     def test_http_url_returns_true(self) -> None:
         """HTTP URLは有効と判定される"""
@@ -219,8 +200,6 @@ class TestIsValidUrl:
         """HTTPS URLは有効と判定される"""
         assert is_valid_url("https://example.com/path?q=1") is True
 
-    # --- 異常系: scheme ---
-
     def test_ftp_url_returns_false(self) -> None:
         """FTPスキームは無効と判定される"""
         assert is_valid_url("ftp://example.com") is False
@@ -229,13 +208,9 @@ class TestIsValidUrl:
         """スキームなしのテキストは無効と判定される"""
         assert is_valid_url("example.com") is False
 
-    # --- 異常系: netloc ---
-
     def test_scheme_only_without_netloc_returns_false(self) -> None:
         """スキームのみでnetlocがない場合は無効と判定される"""
         assert is_valid_url("https://") is False
-
-    # --- 境界値 ---
 
     def test_empty_string_returns_false(self) -> None:
         """空文字列は無効と判定される"""
@@ -244,8 +219,6 @@ class TestIsValidUrl:
     def test_plain_text_returns_false(self) -> None:
         """通常のテキストは無効と判定される"""
         assert is_valid_url("hello world") is False
-
-    # --- 例外処理 ---
 
     def test_value_error_from_urlparse_returns_false(
         self, monkeypatch: pytest.MonkeyPatch
@@ -257,9 +230,6 @@ class TestIsValidUrl:
 
         monkeypatch.setattr("yt_dlp_monitor.urlparse", raise_value_error)
         assert is_valid_url("http://example.com") is False
-
-
-# === _dict_to_option_list ===
 
 
 class TestDictToOptionList:
@@ -286,9 +256,6 @@ class TestDictToOptionList:
         """フラグ型と値付きオプションが混在する辞書を正しく変換する"""
         result = _dict_to_option_list({"--verbose": None, "-f": ["bv+ba"]})
         assert result == ["--verbose", "-f", "bv+ba"]
-
-
-# === merge_yt_dlp_options ===
 
 
 class TestMergeYtDlpOptions:
@@ -326,9 +293,6 @@ class TestMergeYtDlpOptions:
         result = merge_yt_dlp_options(["--verbose"])
         parsed = _parse_option_list(result)
         assert parsed["--verbose"] is None
-
-
-# === parse_args ===
 
 
 class TestParseArgs:
@@ -387,9 +351,6 @@ class TestParseArgs:
         result = parse_args()
         parsed = _parse_option_list(result.yt_dlp_options)
         assert parsed["-f"] == ["bv+ba"]
-
-
-# === DownloadQueue ===
 
 
 class TestDownloadQueue:
@@ -469,9 +430,6 @@ class TestDownloadQueue:
         assert dq.enqueue("https://example.com/1") is None
 
 
-# === ClipboardWatcher ===
-
-
 class TestClipboardWatcher:
     """ClipboardWatcher: クリップボード変更の検出"""
 
@@ -528,9 +486,6 @@ class TestClipboardWatcher:
         watcher = ClipboardWatcher(poll_fn=flaky_poll, interval=0)
         gen = watcher.poll_changes()
         assert next(gen) == "after_error"
-
-
-# === VideoDownloader ===
 
 
 class TestVideoDownloader:
@@ -661,9 +616,6 @@ class TestVideoDownloaderDownload:
             downloader.download("https://example.com/video")
 
             assert "ダウンロードに失敗しました" in caplog.text
-
-
-# === YtDlpMonitorApp ===
 
 
 class TestYtDlpMonitorAppWorker:
