@@ -40,7 +40,7 @@ pre-commit:
 
     - name: pyright
       glob: 'scripts/**/*.py'
-      run: uv run pyright {staged_files}
+      run: uvx pyright {staged_files}
 
     - name: pytest
       glob: 'scripts/**/*.py'
