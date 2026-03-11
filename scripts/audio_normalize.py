@@ -20,7 +20,10 @@ def _ensure_dependencies() -> None:
     """
     from importlib.util import find_spec  # noqa: PLC0415
 
-    if find_spec("ffmpeg_normalize") is not None:
+    if (
+        find_spec("ffmpeg_normalize") is not None
+        and find_spec("yt_dlp_plugins.postprocessor.audio_normalize") is not None
+    ):
         return
 
     import subprocess  # noqa: PLC0415
