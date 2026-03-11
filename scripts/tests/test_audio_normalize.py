@@ -668,6 +668,29 @@ class TestEnsureDependencies:
         assert exc_info.value.code == 1
         mock_call.assert_called_once()
 
+    def test_reruns_when_plugin_missing_but_ffmpeg_normalize_present(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ffmpeg_normalizeはあるがプラグインが未インストールの場合も再実行する"""
+        original_find_spec = importlib.util.find_spec
+
+        def selective_find_spec(name: str, package: str | None = None) -> object:
+            if name == "yt_dlp_plugins.postprocessor.audio_normalize":
+                return None
+            return original_find_spec(name, package)
+
+        monkeypatch.setattr(sys, "argv", ["audio_normalize.py", "test.mp3"])
+
+        with (
+            patch("importlib.util.find_spec", side_effect=selective_find_spec),
+            patch("subprocess.call", return_value=0) as mock_call,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            _ensure_dependencies()
+
+        assert exc_info.value.code == 0
+        mock_call.assert_called_once()
+
 
 class TestSetupLogger:
     """setup_logger: モジュールロガーにStreamHandlerを設定する"""
