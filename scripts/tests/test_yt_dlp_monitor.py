@@ -12,6 +12,7 @@
 - ClipboardWatcher: クリップボード変更の検出
 - VideoDownloader: yt-dlpによるダウンロード実行
 - YtDlpMonitorApp: クリップボード監視からダウンロードまでの統合
+- setup_logger(): アプリケーションロガーの構成
 """
 
 import logging
@@ -30,6 +31,7 @@ from yt_dlp_monitor import (
     is_valid_url,
     merge_yt_dlp_options,
     parse_args,
+    setup_logger,
 )
 
 if TYPE_CHECKING:
@@ -790,3 +792,42 @@ class TestYtDlpMonitorAppRun:
         app.run()
         dq.join()
         assert fake.downloaded == []
+
+
+class TestSetupLogger:
+    """setup_logger: アプリケーションロガーの構成"""
+
+    @pytest.fixture(autouse=True)
+    def cleanup_logger(self) -> Iterator[None]:
+        """テスト後にロガーのハンドラをクリーンアップする"""
+        yield
+        # テスト間でロガー状態が汚染されないよう、ハンドラを全て除去する
+        logger = logging.getLogger("yt_dlp_monitor")
+        logger.handlers.clear()
+
+    def test_returns_logger_instance(self) -> None:
+        """初回呼び出しでLogging.Loggerインスタンスが返される"""
+        result = setup_logger()
+        assert isinstance(result, logging.Logger)
+
+    def test_adds_stream_handler_on_first_call(self) -> None:
+        """初回呼び出しでStreamHandlerが追加される"""
+        setup_logger()
+        logger = logging.getLogger("yt_dlp_monitor")
+        assert len(logger.handlers) == 1
+        assert isinstance(logger.handlers[0], logging.StreamHandler)
+
+    def test_sets_log_level_to_info(self) -> None:
+        """初回呼び出しでログレベルがINFOに設定される"""
+        setup_logger()
+        logger = logging.getLogger("yt_dlp_monitor")
+        assert logger.level == logging.INFO
+
+    def test_no_duplicate_handler_on_second_call(self) -> None:
+        """既にハンドラがある場合はハンドラを追加せず同じロガーを返す"""
+        first = setup_logger()
+        second = setup_logger()
+        logger = logging.getLogger("yt_dlp_monitor")
+        # 二重追加防止: ハンドラは1つのままであること
+        assert len(logger.handlers) == 1
+        assert first is second

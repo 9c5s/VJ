@@ -5,6 +5,7 @@ import json
 import logging
 import subprocess
 import sys
+from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -17,6 +18,7 @@ from audio_normalize import (
     normalize_file,
     parse_args,
     probe_media,
+    setup_logger,
 )
 
 
@@ -610,7 +612,9 @@ class TestEnsureDependencies:
 
     def test_does_nothing_when_dependency_is_available(self) -> None:
         """依存パッケージがインストール済みの場合は何もしない"""
-        _ensure_dependencies()  # SystemExitが送出されないこと
+        with patch("subprocess.call") as mock_call:
+            _ensure_dependencies()
+        mock_call.assert_not_called()
 
     def test_reruns_via_uv_when_dependency_missing(
         self, monkeypatch: pytest.MonkeyPatch
@@ -663,3 +667,50 @@ class TestEnsureDependencies:
 
         assert exc_info.value.code == 1
         mock_call.assert_called_once()
+
+
+class TestSetupLogger:
+    """setup_logger: モジュールロガーにStreamHandlerを設定する"""
+
+    @pytest.fixture(autouse=True)
+    def cleanup_logger_handlers(self) -> Generator[None]:
+        """テスト前後にモジュールロガーのハンドラをクリーンアップする
+
+        各テスト間でロガー状態が汚染されないよう、テスト開始前と終了後の両方でハンドラをすべて削除する
+        """
+        target_logger = logging.getLogger("audio_normalize")
+        target_logger.handlers.clear()
+        yield
+        target_logger.handlers.clear()
+
+    def test_adds_stream_handler_on_first_call(self) -> None:
+        """初回呼び出しでStreamHandlerが追加される"""
+        target_logger = logging.getLogger("audio_normalize")
+        # 事前にハンドラが空であることを確認
+        assert not target_logger.handlers
+
+        setup_logger()
+
+        assert len(target_logger.handlers) == 1
+        assert isinstance(target_logger.handlers[0], logging.StreamHandler)
+
+    def test_sets_log_level_to_info_on_first_call(self) -> None:
+        """初回呼び出しでログレベルがINFOに設定される"""
+        target_logger = logging.getLogger("audio_normalize")
+
+        setup_logger()
+
+        assert target_logger.level == logging.INFO
+
+    def test_does_not_add_handler_when_already_exists(self) -> None:
+        """既にハンドラがある場合は二重追加しない"""
+        target_logger = logging.getLogger("audio_normalize")
+        # 事前にダミーハンドラを設定する
+        dummy_handler = logging.NullHandler()
+        target_logger.addHandler(dummy_handler)
+
+        setup_logger()
+
+        # ハンドラ数が1のまま変化しないことを確認
+        assert len(target_logger.handlers) == 1
+        assert target_logger.handlers[0] is dummy_handler
