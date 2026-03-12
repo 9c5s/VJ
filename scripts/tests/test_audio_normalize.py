@@ -403,6 +403,25 @@ class TestNormalizeFile:
         assert result is True
         assert "拡張子の変更は反映されません" in caplog.text
 
+    def test_resolves_symlink_in_overwrite_mode(self, tmp_path: Path) -> None:
+        """上書きモードでsymlinkを渡すと実体パスに解決して処理する"""
+        real_file = tmp_path / "real.mp3"
+        real_file.write_bytes(b"original")
+        link = tmp_path / "link.mp3"
+        link.symlink_to(real_file)
+        with (
+            patch("audio_normalize.FFmpegNormalize") as mock_cls,
+            patch("audio_normalize.shutil.move") as mock_move,
+        ):
+            mock_norm = MagicMock()
+            mock_cls.return_value = mock_norm
+            result = normalize_file(link, {"target_level": -14.0})
+        assert result is True
+        # add_media_fileとshutil.moveが実体パスで呼ばれることを検証
+        actual_input = mock_norm.add_media_file.call_args[0][0]
+        assert actual_input == str(real_file.resolve())
+        assert mock_move.call_args[0][1] == str(real_file.resolve())
+
 
 class TestParseArgs:
     """parse_args: コマンドライン引数を解析する"""
@@ -676,7 +695,8 @@ class TestEnsureDependencies:
 
         def selective_find_spec(name: str, package: str | None = None) -> object:
             if name == "yt_dlp_plugins.postprocessor.audio_normalize":
-                return None
+                msg = "No module named 'yt_dlp_plugins'"
+                raise ModuleNotFoundError(msg)
             return original_find_spec(name, package)
 
         monkeypatch.setattr(sys, "argv", ["audio_normalize.py", "test.mp3"])
