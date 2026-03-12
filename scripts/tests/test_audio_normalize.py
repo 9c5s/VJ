@@ -408,7 +408,10 @@ class TestNormalizeFile:
         real_file = tmp_path / "real.mp3"
         real_file.write_bytes(b"original")
         link = tmp_path / "link.mp3"
-        link.symlink_to(real_file)
+        try:
+            link.symlink_to(real_file)
+        except NotImplementedError, OSError:
+            pytest.skip("symlinkを作成できない環境")
         with (
             patch("audio_normalize.FFmpegNormalize") as mock_cls,
             patch("audio_normalize.shutil.move") as mock_move,
