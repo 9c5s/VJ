@@ -405,8 +405,13 @@ def _normalize_overwrite(
     except Exception:
         logger.exception("正規化に失敗しました: %s", filepath.name)
     finally:
-        # shutil.move成功後はtmp_pathが存在しないためmissing_ok=Trueで安全
-        Path(tmp_path).unlink(missing_ok=True)
+        try:
+            # shutil.move成功後はtmp_pathが存在しないためmissing_ok=Trueで安全
+            Path(tmp_path).unlink(missing_ok=True)
+        except OSError:
+            logger.warning(
+                "一時ファイルを削除できませんでした: %s", tmp_path, exc_info=True,
+            )
     if success:
         logger.info("正規化が完了しました: %s", filepath.name)
     return success
