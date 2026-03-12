@@ -20,10 +20,14 @@ def _ensure_dependencies() -> None:
     """
     from importlib.util import find_spec  # noqa: PLC0415
 
-    if (
-        find_spec("ffmpeg_normalize") is not None
-        and find_spec("yt_dlp_plugins.postprocessor.audio_normalize") is not None
-    ):
+    try:
+        has_plugin = (
+            find_spec("yt_dlp_plugins.postprocessor.audio_normalize") is not None
+        )
+    except ModuleNotFoundError:
+        has_plugin = False
+
+    if find_spec("ffmpeg_normalize") is not None and has_plugin:
         return
 
     import subprocess  # noqa: PLC0415
@@ -372,6 +376,11 @@ def _normalize_overwrite(
     Returns:
         正規化が成功した場合はTrue、失敗した場合はFalse
     """
+    # symlinkの場合はリンク先の実体パスに解決する
+    # shutil.moveはsymlink自体を置換するため、解決しないとリンクが壊れる
+    if filepath.is_symlink():
+        filepath = filepath.resolve()
+
     try:
         fd, tmp_path = tempfile.mkstemp(suffix=filepath.suffix, dir=filepath.parent)
         os.close(fd)
@@ -444,7 +453,7 @@ def _process_single_file(
     normalize_args: list[str],
     output_dir: Path | None,
     seen_outputs: dict[Path, Path],
-) -> bool | None:
+) -> bool:
     """単一ファイルの正規化処理を実行する
 
     Args:
@@ -454,7 +463,7 @@ def _process_single_file(
         seen_outputs: 出力先パスの衝突検出用辞書 (副作用で更新される)
 
     Returns:
-        True: 成功, False: 失敗, None: スキップ
+        True: 成功, False: 失敗
     """
     probe = probe_media(filepath)
     if probe is None:
