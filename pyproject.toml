@@ -6,7 +6,7 @@ dependencies = [
   "ffmpeg-normalize",
   "pyperclip",
   "yt-dlp",
-  "yt-dlp-audio-normalize>=0.3.0",
+  "yt-dlp-audio-normalize",
 ]
 
 [dependency-groups]
