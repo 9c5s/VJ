@@ -2,7 +2,7 @@
 # requires-python = ">=3.14"
 # dependencies = [
 #     "pyperclip",
-#     "yt-dlp>=2026.2.4",
+#     "yt-dlp",
 #     "yt-dlp-audio-normalize",
 # ]
 # ///
