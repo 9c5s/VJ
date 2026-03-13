@@ -36,7 +36,8 @@ pre-commit:
 
     - name: zizmor
       glob: '.github/workflows/*.{yml,yaml}'
-      run: uvx zizmor {staged_files}
+      run: uvx zizmor --fix --pedantic {staged_files}
+      stage_fixed: true
 
     - name: ruff
       glob: 'scripts/**/*.{py,pyi}'

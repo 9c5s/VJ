@@ -1,0 +1,19 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      timezone: "Asia/Tokyo"
+      interval: "daily"
+      time: "00:00"
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      timezone: "Asia/Tokyo"
+      interval: "daily"
+      time: "00:00"
+    cooldown:
+      default-days: 7
