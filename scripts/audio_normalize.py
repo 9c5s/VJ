@@ -33,7 +33,7 @@ def _ensure_dependencies() -> None:
     import subprocess  # noqa: PLC0415
     import sys  # noqa: PLC0415
 
-    raise SystemExit(subprocess.call(["uv", "run", __file__, *sys.argv[1:]]))
+    raise SystemExit(subprocess.call(["uv", "run", __file__, *sys.argv[1:]]))  # noqa: S603, S607
 
 
 _ensure_dependencies()
@@ -211,8 +211,8 @@ def probe_media(filepath: Path) -> dict[str, Any] | None:
         音声ストリームが存在しない場合やffprobeの実行/解析に失敗した場合はNone
     """
     try:
-        result = subprocess.run(
-            [
+        result = subprocess.run(  # noqa: S603
+            [  # noqa: S607
                 "ffprobe",
                 "-v",
                 "quiet",
