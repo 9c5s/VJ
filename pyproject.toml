@@ -32,7 +32,6 @@ line-length = 88
 indent-width = 4
 preview = true
 include = ["*.py", "*.pyi", "**/pyproject.toml"]
-extend-exclude = [".vscode", ".idea"]
 respect-gitignore = true
 show-fixes = true
 output-format = "full"
@@ -48,45 +47,14 @@ docstring-code-line-length = 72
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
-  "D203",
-  "D213",
   "COM812",
-  "ISC001",
-  "INP001",
-  "FIX002",
-  "TD002",
-  "TD003",
-  "ERA001",
-  "T201",
-  "D400",
   "D415",
+  "ERA001",
 ]
 fixable = ["ALL"]
-unfixable = []
-dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?)|dummy|unused)$"
 preview = true
 explicit-preview-rules = true
 typing-modules = ["typing", "typing_extensions"]
-task-tags = [
-  "TODO",
-  "FIXME",
-  "HACK",
-  "BUG",
-  "NOBUG",
-  "REQ",
-  "IDEA",
-  "NOTE",
-  "ISSUE",
-  "XXX",
-  "やること",
-  "修正",
-  "バグ",
-  "ノート",
-  "問題",
-  "要修正",
-  "要確認",
-  "仮実装",
-]
 
 [tool.ruff.lint.flake8-annotations]
 allow-star-arg-any = false
@@ -97,9 +65,6 @@ mypy-init-return = true
 
 [tool.ruff.lint.flake8-bandit]
 check-typed-exception = true
-
-[tool.ruff.lint.flake8-bugbear]
-extend-immutable-calls = []
 
 [tool.ruff.lint.flake8-comprehensions]
 allow-dict-calls-with-keyword-arguments = false
@@ -147,8 +112,6 @@ force-single-line = false
 force-wrap-aliases = true
 combine-as-imports = true
 split-on-trailing-comma = true
-required-imports = []
-known-first-party = []
 section-order = [
   "future",
   "standard-library",
@@ -161,7 +124,6 @@ section-order = [
 max-complexity = 10
 
 [tool.ruff.lint.pep8-naming]
-ignore-names = []
 classmethod-decorators = [
   "classmethod",
   "pydantic.validator",
@@ -198,24 +160,20 @@ keep-runtime-typing = true
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/tests/**/*.py" = [
+  "ARG",
+  "FBT",
+  "INP001",
+  "PLC0415",
+  "PLR0913",
+  "PLR2004",
   "S101",
   "S105",
   "S106",
   "S108",
-  "ARG",
-  "FBT",
-  "PLR2004",
-  "S311",
-  "ANN",
-  "PLR0913",
   "SLF001",
-  "PLC0415",
-  "TRY003",
-  "TC002",
   "TC003",
-  "B905",
+  "TRY003",
 ]
-"scripts/**/*.py" = ["S603", "S607"]
 
 [tool.uv]
 package = false
