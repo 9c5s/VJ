@@ -53,3 +53,13 @@ pre-commit:
     - name: pytest
       glob: 'scripts/**/*.py'
       run: uv run pytest -q --cov
+
+post-merge:
+  jobs:
+    - name: uv-sync
+      run: uv sync
+
+post-rewrite:
+  jobs:
+    - name: uv-sync
+      run: 'if [ x{1} = xrebase ]; then uv sync; fi'
