@@ -51,4 +51,4 @@ pre-commit:
 
     - name: pytest
       glob: 'scripts/**/*.py'
-      run: uv run pytest
+      run: uv run pytest -q --cov

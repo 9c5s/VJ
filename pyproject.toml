@@ -15,6 +15,13 @@ dev = [
   "pytest-cov",
 ]
 
+[tool.coverage.run]
+source = ["scripts"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 90
+
 [tool.pyright]
 pythonVersion = "3.14"
 typeCheckingMode = "strict"
@@ -23,7 +30,6 @@ venv = ".venv"
 extraPaths = ["scripts"]
 
 [tool.pytest]
-addopts = ["--cov-fail-under=90", "--cov-report=term-missing", "--cov=scripts"]
 testpaths = ["scripts/tests"]
 
 [tool.ruff]
