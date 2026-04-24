@@ -410,7 +410,9 @@ def _normalize_overwrite(
             Path(tmp_path).unlink(missing_ok=True)
         except OSError:
             logger.warning(
-                "一時ファイルを削除できませんでした: %s", tmp_path, exc_info=True,
+                "一時ファイルを削除できませんでした: %s",
+                tmp_path,
+                exc_info=True,
             )
     if success:
         logger.info("正規化が完了しました: %s", filepath.name)

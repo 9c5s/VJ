@@ -42,18 +42,24 @@ pre-commit:
       stage_fixed: true
 
     - name: ruff
-      glob: 'scripts/**/*.{py,pyi}'
+      glob:
+        - 'scripts/*.{py,pyi}'
+        - 'scripts/**/*.{py,pyi}'
       run: >
         uvx ruff check --fix {staged_files} &&
         uvx ruff format {staged_files}
       stage_fixed: true
 
     - name: pyright
-      glob: 'scripts/**/*.py'
+      glob:
+        - 'scripts/*.py'
+        - 'scripts/**/*.py'
       run: uvx pyright {staged_files}
 
     - name: pytest
-      glob: 'scripts/**/*.py'
+      glob:
+        - 'scripts/*.py'
+        - 'scripts/**/*.py'
       run: uv run pytest -q --cov
 
 post-merge:
