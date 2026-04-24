@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 import pyperclip
 import yt_dlp
-from yt_dlp.utils import DownloadError
+from yt_dlp.utils import DownloadError, expand_path
 from yt_dlp_plugins.postprocessor.audio_normalize import (  # pyright: ignore[reportMissingImports,reportMissingTypeStubs]
     AudioNormalizePP,
 )
@@ -210,7 +210,8 @@ def _resolve_archive_path(
     path_str = values[-1]
     if not path_str.strip():
         return None
-    return Path(path_str)
+    # yt-dlp本体と同じ展開ロジックを適用し、~や環境変数を正規化する
+    return Path(expand_path(path_str))
 
 
 def parse_args() -> ParsedArgs:
