@@ -528,6 +528,56 @@ def setup_logger() -> logging.Logger:
     return logger
 
 
+def _validate_symlink_archive(archive_file: Path, logger: logging.Logger) -> None:
+    """symlinkアーカイブの状態を検証する
+
+    異常時は`sys.exit(1)`を送出し、正常時は呼び出し元へ戻る
+
+    Args:
+        archive_file: symlinkとして存在するアーカイブファイルのパス
+        logger: ロガーインスタンス
+    """
+    if archive_file.is_file():
+        if not os.access(archive_file, os.W_OK):
+            logger.error(
+                "アーカイブsymlinkのリンク先に書き込み権限がありません: %s",
+                archive_file,
+            )
+            sys.exit(1)
+        return
+    if archive_file.exists():
+        logger.error(
+            "アーカイブsymlinkのリンク先がファイルではありません: %s",
+            archive_file,
+        )
+        sys.exit(1)
+    # リンク先が未作成でも親ディレクトリが書き込み可能ならyt-dlp実行時に作成できる
+    target = archive_file.readlink()
+    if not target.is_absolute():
+        target = archive_file.parent / target
+    target_parent = target.parent
+    if not target_parent.is_dir():
+        logger.error(
+            "アーカイブsymlinkのリンク先の親ディレクトリが存在しません: %s -> %s",
+            archive_file,
+            target,
+        )
+        sys.exit(1)
+    if not os.access(target_parent, os.W_OK):
+        logger.error(
+            "アーカイブsymlinkのリンク先の親ディレクトリに書き込み権限がありません:"
+            " %s -> %s",
+            archive_file,
+            target,
+        )
+        sys.exit(1)
+    logger.warning(
+        "アーカイブsymlinkのリンク先が未作成です: %s -> %s (実行時に作成されます)",
+        archive_file,
+        target,
+    )
+
+
 def ensure_download_archive(archive_file: Path, logger: logging.Logger) -> None:
     """ダウンロードアーカイブファイル(symlink運用前提)の状態を確認する
 
@@ -541,26 +591,8 @@ def ensure_download_archive(archive_file: Path, logger: logging.Logger) -> None:
         logger: ロガーインスタンス
     """
     if archive_file.is_symlink():
-        if archive_file.is_file():
-            if not os.access(archive_file, os.W_OK):
-                logger.error(
-                    "アーカイブsymlinkのリンク先に書き込み権限がありません: %s",
-                    archive_file,
-                )
-                sys.exit(1)
-            return
-        if archive_file.exists():
-            logger.error(
-                "アーカイブsymlinkのリンク先がファイルではありません: %s",
-                archive_file,
-            )
-        else:
-            logger.error(
-                "アーカイブsymlinkのリンク先が存在しません: %s -> %s",
-                archive_file,
-                archive_file.readlink(),
-            )
-        sys.exit(1)
+        _validate_symlink_archive(archive_file, logger)
+        return
 
     parent = archive_file.parent
     if not parent.is_dir():

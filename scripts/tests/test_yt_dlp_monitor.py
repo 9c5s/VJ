@@ -1088,14 +1088,27 @@ class TestEnsureDownloadArchive:
             ensure_download_archive(link, self._logger())
         assert caplog.records == []
 
-    def test_exits_with_code_1_on_broken_symlink(
+    def test_warns_on_broken_symlink_with_writable_parent(
         self,
         tmp_path: Path,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """symlinkのリンク先が存在しない場合、エラーログを出してSystemExit(1)する"""
+        """symlinkのリンク先が未作成でも親ディレクトリが書き込み可能なら警告のみで続行する"""
         target = tmp_path / "missing_target.txt"
         link = tmp_path / "downloaded.txt"
+        self._make_symlink(link, target)
+        with caplog.at_level(logging.WARNING, logger=self._LOGGER_NAME):
+            ensure_download_archive(link, self._logger())
+        assert "リンク先が未作成です" in caplog.text
+
+    def test_exits_on_broken_symlink_with_missing_parent(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """symlinkのリンク先親ディレクトリが存在しない場合、SystemExit(1)する"""
+        target = tmp_path / "nonexistent_dir" / "downloaded.txt"
+        link = tmp_path / "link.txt"
         self._make_symlink(link, target)
         with (
             caplog.at_level(logging.ERROR, logger=self._LOGGER_NAME),
@@ -1103,7 +1116,32 @@ class TestEnsureDownloadArchive:
         ):
             ensure_download_archive(link, self._logger())
         assert exc_info.value.code == 1
-        assert "リンク先が存在しません" in caplog.text
+        assert "リンク先の親ディレクトリが存在しません" in caplog.text
+
+    def test_exits_on_broken_symlink_with_non_writable_parent(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """symlinkのリンク先親が書き込み不可の場合、SystemExit(1)する"""
+        target_parent = tmp_path / "readonly_parent"
+        target_parent.mkdir()
+        target = target_parent / "downloaded.txt"
+        link = tmp_path / "link.txt"
+        self._make_symlink(link, target)
+        target_parent.chmod(0o555)
+        try:
+            if os.access(target_parent, os.W_OK):
+                pytest.skip("親ディレクトリを書き込み不可に設定できない環境")
+            with (
+                caplog.at_level(logging.ERROR, logger=self._LOGGER_NAME),
+                pytest.raises(SystemExit) as exc_info,
+            ):
+                ensure_download_archive(link, self._logger())
+            assert exc_info.value.code == 1
+            assert "リンク先の親ディレクトリに書き込み権限がありません" in caplog.text
+        finally:
+            target_parent.chmod(0o755)
 
     def test_warns_when_file_is_not_symlink(
         self,
