@@ -64,7 +64,7 @@ wheels = [
 
 [[package]]
 name = "ffmpeg-normalize"
-version = "1.37.3"
+version = "1.37.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "colorama", marker = "sys_platform == 'win32'" },
@@ -73,9 +73,9 @@ dependencies = [
     { name = "mutagen" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d8/77/4fe5b7f721d5cc18173515f37f9f33d9742654564d62f0710fb31deb9296/ffmpeg_normalize-1.37.3.tar.gz", hash = "sha256:98de2f9a2493f8b57906ffd067d3efa37ab385369e0f73290daf2c2cdaa3796d", size = 33987, upload-time = "2026-02-08T19:23:29.695Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c8/1a/0d27abae69de51b27dae48892f2d325dda3f80cc7def8ac216058b27c20c/ffmpeg_normalize-1.37.6.tar.gz", hash = "sha256:cec7d6a9d1b2108f0e4f8fcbd304f192676a708e8d11faf948073bf8eec562ee", size = 34800, upload-time = "2026-04-13T11:59:59.226Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6e/be/beb66d03c216024841d6370d2bb3ad28efd9d88defaae05b02c5d9089383/ffmpeg_normalize-1.37.3-py3-none-any.whl", hash = "sha256:699711ed5ae37f387cec74c5d14e6948a073f44bc0a2d3b381fd549a19f132f7", size = 40338, upload-time = "2026-02-08T19:23:28.458Z" },
+    { url = "https://files.pythonhosted.org/packages/8e/a6/63f2d450cc11275a5e9e67e4734e9cd8f85ab3bf5b4af50f4c304424735a/ffmpeg_normalize-1.37.6-py3-none-any.whl", hash = "sha256:3e346c6f5bc2fc5411d22b52d5e33b994cd690ece657cd68d58911dfcbd5bd6b", size = 41075, upload-time = "2026-04-13T11:59:57.881Z" },
 ]
 
 [[package]]
