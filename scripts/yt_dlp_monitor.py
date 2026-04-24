@@ -80,6 +80,7 @@ def _parse_option_list(options: list[str]) -> OptionDict:
     """オプションリストをキーと値のペアの辞書に変換する
 
     同一キーが複数回出現する場合(--ppa等)、全ての値をリストとして保持する
+    `--key=value` 形式も `--key value` と等価に扱う
 
     Args:
         options: yt-dlpオプションのリスト
@@ -92,7 +93,15 @@ def _parse_option_list(options: list[str]) -> OptionDict:
     i = 0
     while i < len(options):
         opt = options[i]
-        if opt.startswith("-"):
+        if opt.startswith("--") and "=" in opt:
+            key, _, value = opt.partition("=")
+            values = result.get(key)
+            if values is None:
+                values = []
+                result[key] = values
+            values.append(value)
+            i += 1
+        elif opt.startswith("-"):
             if i + 1 < len(options) and not options[i + 1].startswith("-"):
                 values = result.get(opt)
                 if values is None:
@@ -184,7 +193,11 @@ def _resolve_archive_path(
             default=-1,
         )
         archive_idx = max(
-            (i for i, v in enumerate(yt_dlp_options) if v == "--download-archive"),
+            (
+                i
+                for i, v in enumerate(yt_dlp_options)
+                if v == "--download-archive" or v.startswith("--download-archive=")
+            ),
             default=-1,
         )
         if disable_idx > archive_idx:
@@ -525,6 +538,12 @@ def ensure_download_archive(archive_file: Path, logger: logging.Logger) -> None:
     """
     if archive_file.is_symlink():
         if archive_file.is_file():
+            if not os.access(archive_file, os.W_OK):
+                logger.error(
+                    "アーカイブsymlinkのリンク先に書き込み権限がありません: %s",
+                    archive_file,
+                )
+                sys.exit(1)
             return
         if archive_file.exists():
             logger.error(
@@ -556,6 +575,12 @@ def ensure_download_archive(archive_file: Path, logger: logging.Logger) -> None:
     if archive_file.exists():
         if not archive_file.is_file():
             logger.error("アーカイブパスがファイルではありません: %s", archive_file)
+            sys.exit(1)
+        if not os.access(archive_file, os.W_OK):
+            logger.error(
+                "アーカイブファイルに書き込み権限がありません: %s",
+                archive_file,
+            )
             sys.exit(1)
         logger.warning("アーカイブファイルがsymlinkではありません: %s", archive_file)
         return
