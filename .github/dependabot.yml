@@ -4,7 +4,8 @@ updates:
     directory: "/"
     schedule:
       timezone: "Asia/Tokyo"
-      interval: "daily"
+      interval: "weekly"
+      day: "monday"
       time: "00:00"
     cooldown:
       default-days: 7
@@ -13,7 +14,8 @@ updates:
     directory: "/"
     schedule:
       timezone: "Asia/Tokyo"
-      interval: "daily"
+      interval: "weekly"
+      day: "monday"
       time: "00:00"
     cooldown:
       default-days: 7
