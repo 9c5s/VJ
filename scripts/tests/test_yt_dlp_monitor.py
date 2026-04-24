@@ -25,6 +25,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from yt_dlp_monitor import (
+    YT_DLP_OPTIONS,
     DownloadQueue,
     _dict_to_option_list,
     _parse_option_list,
@@ -298,6 +299,21 @@ class TestMergeYtDlpOptions:
         result = merge_yt_dlp_options(["--verbose"])
         parsed = _parse_option_list(result)
         assert parsed["--verbose"] is None
+
+
+class TestYtDlpOptionsDefaults:
+    """YT_DLP_OPTIONS: デフォルトオプションの内容検証"""
+
+    def test_write_thumbnail_enabled_by_default(self) -> None:
+        """サムネイル書き出しがデフォルトで有効になっている"""
+        parsed = _parse_option_list(YT_DLP_OPTIONS)
+        assert "--write-thumbnail" in parsed
+        assert parsed["--write-thumbnail"] is None
+
+    def test_convert_thumbnails_to_png(self) -> None:
+        """サムネイル変換形式がpngに指定されている"""
+        parsed = _parse_option_list(YT_DLP_OPTIONS)
+        assert parsed.get("--convert-thumbnails") == ["png"]
 
 
 class TestParseArgs:
