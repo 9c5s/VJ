@@ -28,6 +28,7 @@ from yt_dlp_monitor import (
     DownloadQueue,
     _dict_to_option_list,
     _parse_option_list,
+    ensure_download_archive,
     is_valid_url,
     merge_yt_dlp_options,
     parse_args,
@@ -831,3 +832,79 @@ class TestSetupLogger:
         # 二重追加防止: ハンドラは1つのままであること
         assert len(logger.handlers) == 1
         assert first is second
+
+
+class TestEnsureDownloadArchive:
+    """ensure_download_archive: symlink運用前提のアーカイブファイル検証"""
+
+    _LOGGER_NAME = "test_ensure_download_archive"
+
+    @pytest.fixture(autouse=True)
+    def _cleanup_logger(self) -> Iterator[None]:
+        """テスト後にテスト専用ロガーのハンドラを除去する"""
+        yield
+        logging.getLogger(self._LOGGER_NAME).handlers.clear()
+
+    def _logger(self) -> logging.Logger:
+        return logging.getLogger(self._LOGGER_NAME)
+
+    def _make_symlink(self, link: Path, target: Path) -> None:
+        """symlinkを作成する。作成不能な環境ではテストをスキップする"""
+        try:
+            link.symlink_to(target)
+        except NotImplementedError, OSError:
+            pytest.skip("symlinkを作成できない環境")
+
+    def test_returns_silently_when_symlink_target_exists(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """symlinkのリンク先が存在する場合、ログ出力なしで戻る"""
+        target = tmp_path / "target.txt"
+        target.write_text("")
+        link = tmp_path / "downloaded.txt"
+        self._make_symlink(link, target)
+        with caplog.at_level(logging.DEBUG, logger=self._LOGGER_NAME):
+            ensure_download_archive(link, self._logger())
+        assert caplog.records == []
+
+    def test_exits_with_code_1_on_broken_symlink(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """symlinkのリンク先が存在しない場合、エラーログを出してSystemExit(1)する"""
+        target = tmp_path / "missing_target.txt"
+        link = tmp_path / "downloaded.txt"
+        self._make_symlink(link, target)
+        with (
+            caplog.at_level(logging.ERROR, logger=self._LOGGER_NAME),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            ensure_download_archive(link, self._logger())
+        assert exc_info.value.code == 1
+        assert "リンク先が存在しません" in caplog.text
+
+    def test_warns_when_file_is_not_symlink(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """通常ファイル(非symlink)の場合、警告ログを出して続行する"""
+        archive = tmp_path / "downloaded.txt"
+        archive.write_text("")
+        with caplog.at_level(logging.WARNING, logger=self._LOGGER_NAME):
+            ensure_download_archive(archive, self._logger())
+        assert "symlinkではありません" in caplog.text
+
+    def test_warns_when_file_does_not_exist(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """ファイルが存在しない場合、未作成の旨の警告を出して続行する"""
+        archive = tmp_path / "does_not_exist.txt"
+        with caplog.at_level(logging.WARNING, logger=self._LOGGER_NAME):
+            ensure_download_archive(archive, self._logger())
+        assert "存在しません" in caplog.text

@@ -48,9 +48,7 @@ class ParsedArgs(NamedTuple):
 # 設定
 POLLING_INTERVAL: Final[float] = 0.1
 DOWNLOAD_DIR: Final[Path] = Path.home() / "Downloads" / "yt_dlp"
-DOWNLOAD_ARCHIVE_FILE: Final[Path] = (
-    Path.home() / "projects" / "ytdlp-archive" / "downloaded.txt"
-)
+DOWNLOAD_ARCHIVE_FILE: Final[Path] = DOWNLOAD_DIR / "downloaded.txt"
 YT_DLP_OPTIONS: Final[list[str]] = [
     "--ignore-config",
     "-S",
@@ -458,6 +456,37 @@ def setup_logger() -> logging.Logger:
     return logger
 
 
+def ensure_download_archive(archive_file: Path, logger: logging.Logger) -> None:
+    """ダウンロードアーカイブファイル(symlink運用前提)の状態を確認する
+
+    symlinkとしてリンク先が存在する場合のみ正常と見なす
+    リンク切れはyt-dlp書き込み時に必ず失敗するため、起動時点で中止する
+    symlinkでない実ファイルやファイル未作成の場合は警告のみ出力して続行する
+
+    Args:
+        archive_file: ダウンロードアーカイブファイルのパス
+        logger: ロガーインスタンス
+    """
+    if archive_file.is_symlink():
+        if archive_file.exists():
+            return
+        logger.error(
+            "アーカイブsymlinkのリンク先が存在しません: %s -> %s",
+            archive_file,
+            archive_file.readlink(),
+        )
+        sys.exit(1)
+
+    if archive_file.exists():
+        logger.warning("アーカイブファイルがsymlinkではありません: %s", archive_file)
+        return
+
+    logger.warning(
+        "アーカイブファイルが存在しません: %s (実行時に通常ファイルとして作成されます)",
+        archive_file,
+    )
+
+
 def is_valid_url(text: str) -> bool:
     """指定されたテキストが有効なURLかどうかを判定する
 
@@ -477,6 +506,7 @@ def is_valid_url(text: str) -> bool:
 if __name__ == "__main__":
     parsed = parse_args()
     logger = setup_logger()
+    ensure_download_archive(DOWNLOAD_ARCHIVE_FILE, logger)
     watcher = ClipboardWatcher()
     downloader = VideoDownloader(
         parsed.yt_dlp_options, logger, normalize=parsed.normalize
