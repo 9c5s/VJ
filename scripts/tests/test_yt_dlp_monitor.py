@@ -1059,3 +1059,37 @@ class TestEnsureDownloadArchive:
             ensure_download_archive(archive, self._logger())
         assert exc_info.value.code == 1
         assert "親ディレクトリが存在しません" in caplog.text
+
+    def test_exits_when_symlink_target_is_directory(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """symlinkのリンク先がディレクトリの場合、エラーログを出してSystemExit(1)する"""
+        target_dir = tmp_path / "target_dir"
+        target_dir.mkdir()
+        link = tmp_path / "downloaded.txt"
+        self._make_symlink(link, target_dir)
+        with (
+            caplog.at_level(logging.ERROR, logger=self._LOGGER_NAME),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            ensure_download_archive(link, self._logger())
+        assert exc_info.value.code == 1
+        assert "ファイルではありません" in caplog.text
+
+    def test_exits_when_archive_path_is_directory(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """アーカイブパス自体がディレクトリの場合、エラーログを出してSystemExit(1)する"""
+        archive = tmp_path / "archive_as_dir"
+        archive.mkdir()
+        with (
+            caplog.at_level(logging.ERROR, logger=self._LOGGER_NAME),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            ensure_download_archive(archive, self._logger())
+        assert exc_info.value.code == 1
+        assert "ファイルではありません" in caplog.text

@@ -524,13 +524,19 @@ def ensure_download_archive(archive_file: Path, logger: logging.Logger) -> None:
         logger: ロガーインスタンス
     """
     if archive_file.is_symlink():
-        if archive_file.exists():
+        if archive_file.is_file():
             return
-        logger.error(
-            "アーカイブsymlinkのリンク先が存在しません: %s -> %s",
-            archive_file,
-            archive_file.readlink(),
-        )
+        if archive_file.exists():
+            logger.error(
+                "アーカイブsymlinkのリンク先がファイルではありません: %s",
+                archive_file,
+            )
+        else:
+            logger.error(
+                "アーカイブsymlinkのリンク先が存在しません: %s -> %s",
+                archive_file,
+                archive_file.readlink(),
+            )
         sys.exit(1)
 
     parent = archive_file.parent
@@ -548,6 +554,9 @@ def ensure_download_archive(archive_file: Path, logger: logging.Logger) -> None:
         sys.exit(1)
 
     if archive_file.exists():
+        if not archive_file.is_file():
+            logger.error("アーカイブパスがファイルではありません: %s", archive_file)
+            sys.exit(1)
         logger.warning("アーカイブファイルがsymlinkではありません: %s", archive_file)
         return
 
@@ -578,8 +587,6 @@ if __name__ == "__main__":
     logger = setup_logger()
     parsed_options = _parse_option_list(parsed.yt_dlp_options)
     archive_path = _resolve_archive_path(parsed.yt_dlp_options, parsed=parsed_options)
-    if archive_path is not None:
-        ensure_download_archive(archive_path, logger)
     watcher = ClipboardWatcher()
     downloader = VideoDownloader(
         parsed.yt_dlp_options,
@@ -587,6 +594,8 @@ if __name__ == "__main__":
         normalize=parsed.normalize,
         parsed_options=parsed_options,
     )
+    if archive_path is not None:
+        ensure_download_archive(archive_path, logger)
     app = YtDlpMonitorApp(
         watcher=watcher,
         downloader=downloader,
