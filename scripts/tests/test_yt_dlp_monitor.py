@@ -474,6 +474,21 @@ class TestResolveArchivePath:
         ])
         assert result is None
 
+    def test_expands_tilde_in_path(self) -> None:
+        """~ はホームディレクトリに展開される"""
+        result = _resolve_archive_path(["--download-archive=~/archive.txt"])
+        assert result == Path.home() / "archive.txt"
+
+    def test_expands_environment_variable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """環境変数が値に含まれていれば展開される"""
+        monkeypatch.setenv("TEST_ARCHIVE_DIR", "/custom/dir")
+        result = _resolve_archive_path(
+            ["--download-archive=$TEST_ARCHIVE_DIR/archive.txt"],
+        )
+        assert result == Path("/custom/dir/archive.txt")
+
 
 class TestParseArgs:
     """parse_args: コマンドライン引数を解析してParsedArgsを返す"""
