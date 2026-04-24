@@ -16,6 +16,7 @@
 """
 
 import logging
+import os
 import sys
 import threading
 import time
@@ -196,6 +197,23 @@ class TestParseOptionList:
                 "AudioNormalize:-t -14.0",
             ],
         }
+
+    def test_equals_form_parsed_as_key_value(self) -> None:
+        """--key=value 形式が key と value に分解されて格納される"""
+        result = _parse_option_list(["--download-archive=/custom/path"])
+        assert result == {"--download-archive": ["/custom/path"]}
+
+    def test_equals_form_accumulates_with_space_form(self) -> None:
+        """--key=value と --key value 形式が混在しても同一キーに蓄積される"""
+        result = _parse_option_list(
+            ["--ppa", "first", "--ppa=second"],
+        )
+        assert result == {"--ppa": ["first", "second"]}
+
+    def test_equals_form_with_embedded_equals_preserves_rest(self) -> None:
+        """値に = が含まれる場合、最初の = だけで分割される"""
+        result = _parse_option_list(["--ppa=Merger+ffmpeg_o1:-map_metadata=-1"])
+        assert result == {"--ppa": ["Merger+ffmpeg_o1:-map_metadata=-1"]}
 
 
 class TestIsValidUrl:
@@ -434,6 +452,27 @@ class TestResolveArchivePath:
         injected = _parse_option_list(["--download-archive", "/injected/path.txt"])
         result = _resolve_archive_path(raw, parsed=injected)
         assert result == Path("/injected/path.txt")
+
+    def test_extracts_from_equals_form(self) -> None:
+        """--download-archive=<path> 形式からパスを抽出する"""
+        result = _resolve_archive_path(["--download-archive=/equals/path.txt"])
+        assert result == Path("/equals/path.txt")
+
+    def test_last_wins_with_equals_form_archive(self) -> None:
+        """--no-download-archive の後に --download-archive=<path> があれば有効"""
+        result = _resolve_archive_path([
+            "--no-download-archive",
+            "--download-archive=/equals/path.txt",
+        ])
+        assert result == Path("/equals/path.txt")
+
+    def test_last_wins_with_equals_form_disabled_after(self) -> None:
+        """--download-archive=<path> の後に --no-download-archive があれば無効化"""
+        result = _resolve_archive_path([
+            "--download-archive=/equals/path.txt",
+            "--no-download-archive",
+        ])
+        assert result is None
 
 
 class TestParseArgs:
@@ -1093,3 +1132,49 @@ class TestEnsureDownloadArchive:
             ensure_download_archive(archive, self._logger())
         assert exc_info.value.code == 1
         assert "ファイルではありません" in caplog.text
+
+    def test_exits_when_existing_file_not_writable(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """既存ファイルに書き込み権限がない場合、エラーログを出してSystemExit(1)する"""
+        archive = tmp_path / "readonly.txt"
+        archive.write_text("")
+        archive.chmod(0o444)
+        try:
+            if os.access(archive, os.W_OK):
+                pytest.skip("書き込み不可を設定できない環境")
+            with (
+                caplog.at_level(logging.ERROR, logger=self._LOGGER_NAME),
+                pytest.raises(SystemExit) as exc_info,
+            ):
+                ensure_download_archive(archive, self._logger())
+            assert exc_info.value.code == 1
+            assert "書き込み権限がありません" in caplog.text
+        finally:
+            archive.chmod(0o644)
+
+    def test_exits_when_symlink_target_not_writable(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """symlinkのリンク先が書き込み不可の場合、エラーログを出してSystemExit(1)する"""
+        target = tmp_path / "readonly_target.txt"
+        target.write_text("")
+        target.chmod(0o444)
+        link = tmp_path / "downloaded.txt"
+        self._make_symlink(link, target)
+        try:
+            if os.access(link, os.W_OK):
+                pytest.skip("書き込み不可を設定できない環境")
+            with (
+                caplog.at_level(logging.ERROR, logger=self._LOGGER_NAME),
+                pytest.raises(SystemExit) as exc_info,
+            ):
+                ensure_download_archive(link, self._logger())
+            assert exc_info.value.code == 1
+            assert "書き込み権限がありません" in caplog.text
+        finally:
+            target.chmod(0o644)
