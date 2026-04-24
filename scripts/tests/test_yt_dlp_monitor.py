@@ -321,6 +321,17 @@ class TestMergeYtDlpOptions:
         parsed = _parse_option_list(result)
         assert parsed["--verbose"] is None
 
+    def test_override_moves_existing_key_to_tail(self) -> None:
+        """既存キーの上書きはbase位置から末尾へ移動しoverrideトークン順を保持する"""
+        result = merge_yt_dlp_options([
+            "--download-archive=/custom.txt",
+            "--no-download-archive",
+        ])
+        archive_idx = result.index("--download-archive")
+        no_archive_idx = result.index("--no-download-archive")
+        # overrideの順序通り --no-download-archive が後に来る
+        assert no_archive_idx > archive_idx
+
 
 class TestYtDlpOptionsDefaults:
     """YT_DLP_OPTIONS: デフォルトオプションの内容検証"""
@@ -488,6 +499,24 @@ class TestResolveArchivePath:
             ["--download-archive=$TEST_ARCHIVE_DIR/archive.txt"],
         )
         assert result == Path("/custom/dir/archive.txt")
+
+    def test_equals_form_through_merge_last_wins_enable(self) -> None:
+        """merge経由で --no-download-archive の後の =形式 --download-archive が勝つ"""
+        opts = merge_yt_dlp_options([
+            "--no-download-archive",
+            "--download-archive=/custom.txt",
+        ])
+        result = _resolve_archive_path(opts)
+        assert result == Path("/custom.txt")
+
+    def test_equals_form_through_merge_last_wins_disable(self) -> None:
+        """merge経由で =形式 --download-archive の後の --no-download-archive が勝つ"""
+        opts = merge_yt_dlp_options([
+            "--download-archive=/custom.txt",
+            "--no-download-archive",
+        ])
+        result = _resolve_archive_path(opts)
+        assert result is None
 
 
 class TestParseArgs:

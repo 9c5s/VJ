@@ -159,6 +159,9 @@ def merge_yt_dlp_options(overrides: list[str]) -> list[str]:
             # デフォルトに存在するオプションが値なしで渡された場合は削除
             del base[key]
         else:
+            # 既存キーは一度削除して末尾に再挿入し、overrideのトークン順を保持する
+            if key in base:
+                del base[key]
             base[key] = value
 
     return _dict_to_option_list(base)
