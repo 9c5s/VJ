@@ -25,10 +25,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from yt_dlp_monitor import (
+    DOWNLOAD_ARCHIVE_FILE,
+    DOWNLOAD_DIR,
     YT_DLP_OPTIONS,
     DownloadQueue,
     _dict_to_option_list,
     _parse_option_list,
+    _resolve_archive_path,
     ensure_download_archive,
     is_valid_url,
     merge_yt_dlp_options,
@@ -304,6 +307,32 @@ class TestMergeYtDlpOptions:
 class TestYtDlpOptionsDefaults:
     """YT_DLP_OPTIONS: デフォルトオプションの内容検証"""
 
+    def test_ignore_config_enabled(self) -> None:
+        """--ignore-configフラグが含まれる"""
+        parsed = _parse_option_list(YT_DLP_OPTIONS)
+        assert "--ignore-config" in parsed
+        assert parsed["--ignore-config"] is None
+
+    def test_format_sort_preference(self) -> None:
+        """-Sでコーデック・解像度・fps・HDRの優先順位が指定されている"""
+        parsed = _parse_option_list(YT_DLP_OPTIONS)
+        assert parsed["-S"] == ["codec:avc:aac,res:1080,fps:60,hdr:sdr"]
+
+    def test_format_selects_best_video_plus_audio(self) -> None:
+        """-fがbv+ba(best video + best audio)に設定されている"""
+        parsed = _parse_option_list(YT_DLP_OPTIONS)
+        assert parsed["-f"] == ["bv+ba"]
+
+    def test_output_dir_uses_download_dir(self) -> None:
+        """-PがDOWNLOAD_DIR定数を指している"""
+        parsed = _parse_option_list(YT_DLP_OPTIONS)
+        assert parsed["-P"] == [str(DOWNLOAD_DIR)]
+
+    def test_output_template_uses_title_and_id(self) -> None:
+        """-oがtitleとidを組み合わせたテンプレートに設定されている"""
+        parsed = _parse_option_list(YT_DLP_OPTIONS)
+        assert parsed["-o"] == ["%(title)s_%(id)s"]
+
     def test_write_thumbnail_enabled_by_default(self) -> None:
         """サムネイル書き出しがデフォルトで有効になっている"""
         parsed = _parse_option_list(YT_DLP_OPTIONS)
@@ -314,6 +343,62 @@ class TestYtDlpOptionsDefaults:
         """サムネイル変換形式がpngに指定されている"""
         parsed = _parse_option_list(YT_DLP_OPTIONS)
         assert parsed.get("--convert-thumbnails") == ["png"]
+
+    def test_ppa_contains_merger_strip_metadata(self) -> None:
+        """--ppaにMergerのメタデータ除去設定が含まれる"""
+        parsed = _parse_option_list(YT_DLP_OPTIONS)
+        ppa = parsed["--ppa"]
+        assert ppa is not None
+        assert "Merger+ffmpeg_o1:-map_metadata -1" in ppa
+
+    def test_ppa_contains_audio_normalize(self) -> None:
+        """--ppaにAudioNormalizeの設定が含まれる"""
+        parsed = _parse_option_list(YT_DLP_OPTIONS)
+        ppa = parsed["--ppa"]
+        assert ppa is not None
+        assert any(v.startswith("AudioNormalize:") for v in ppa)
+
+    def test_remote_components_uses_ejs_github(self) -> None:
+        """--remote-componentsがejs:githubに設定されている"""
+        parsed = _parse_option_list(YT_DLP_OPTIONS)
+        assert parsed["--remote-components"] == ["ejs:github"]
+
+    def test_cookies_from_firefox(self) -> None:
+        """--cookies-from-browserがfirefoxに設定されている"""
+        parsed = _parse_option_list(YT_DLP_OPTIONS)
+        assert parsed["--cookies-from-browser"] == ["firefox"]
+
+    def test_download_archive_points_to_constant(self) -> None:
+        """--download-archiveがDOWNLOAD_ARCHIVE_FILE定数を指している"""
+        parsed = _parse_option_list(YT_DLP_OPTIONS)
+        assert parsed["--download-archive"] == [str(DOWNLOAD_ARCHIVE_FILE)]
+
+
+class TestResolveArchivePath:
+    """_resolve_archive_path: yt-dlpオプションから実効アーカイブパスを抽出する"""
+
+    def test_extracts_default_archive_path(self) -> None:
+        """デフォルトのYT_DLP_OPTIONSからDOWNLOAD_ARCHIVE_FILEが抽出される"""
+        result = _resolve_archive_path(list(YT_DLP_OPTIONS))
+        assert result == DOWNLOAD_ARCHIVE_FILE
+
+    def test_returns_custom_path_when_overridden(self) -> None:
+        """CLI overrideで指定されたカスタムパスが抽出される"""
+        opts = merge_yt_dlp_options(["--download-archive", "/custom/path.txt"])
+        result = _resolve_archive_path(opts)
+        assert result == Path("/custom/path.txt")
+
+    def test_returns_none_when_no_download_archive_flag_present(self) -> None:
+        """--no-download-archiveが含まれる場合はNoneを返す"""
+        opts = merge_yt_dlp_options(["--no-download-archive"])
+        result = _resolve_archive_path(opts)
+        assert result is None
+
+    def test_returns_none_when_download_archive_removed_via_merge(self) -> None:
+        """mergeで--download-archiveが削除された場合はNoneを返す"""
+        opts = merge_yt_dlp_options(["--download-archive"])
+        result = _resolve_archive_path(opts)
+        assert result is None
 
 
 class TestParseArgs:

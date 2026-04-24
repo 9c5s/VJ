@@ -154,6 +154,27 @@ def merge_yt_dlp_options(overrides: list[str]) -> list[str]:
     return _dict_to_option_list(base)
 
 
+def _resolve_archive_path(yt_dlp_options: list[str]) -> Path | None:
+    """yt-dlpオプションから実効のダウンロードアーカイブパスを抽出する
+
+    --no-download-archiveが含まれる、または--download-archiveが省略されている場合は
+    Noneを返す(アーカイブ無効)
+
+    Args:
+        yt_dlp_options: yt-dlpに渡すオプションリスト
+
+    Returns:
+        --download-archiveのパス。無効化されている場合はNone
+    """
+    parsed = _parse_option_list(yt_dlp_options)
+    if "--no-download-archive" in parsed:
+        return None
+    values = parsed.get("--download-archive")
+    if not values:
+        return None
+    return Path(values[-1])
+
+
 def parse_args() -> ParsedArgs:
     """コマンドライン引数を解析し、yt-dlpオプションと設定を返す
 
@@ -509,7 +530,9 @@ def is_valid_url(text: str) -> bool:
 if __name__ == "__main__":
     parsed = parse_args()
     logger = setup_logger()
-    ensure_download_archive(DOWNLOAD_ARCHIVE_FILE, logger)
+    archive_path = _resolve_archive_path(parsed.yt_dlp_options)
+    if archive_path is not None:
+        ensure_download_archive(archive_path, logger)
     watcher = ClipboardWatcher()
     downloader = VideoDownloader(
         parsed.yt_dlp_options, logger, normalize=parsed.normalize
