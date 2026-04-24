@@ -13,6 +13,7 @@
 
 import argparse
 import logging
+import os
 import queue
 import sys
 import threading
@@ -26,7 +27,7 @@ from typing import (
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterator, Mapping
 
 import pyperclip
 import yt_dlp
@@ -154,25 +155,49 @@ def merge_yt_dlp_options(overrides: list[str]) -> list[str]:
     return _dict_to_option_list(base)
 
 
-def _resolve_archive_path(yt_dlp_options: list[str]) -> Path | None:
+def _resolve_archive_path(
+    yt_dlp_options: list[str],
+    *,
+    parsed: Mapping[str, list[str] | None] | None = None,
+) -> Path | None:
     """yt-dlpオプションから実効のダウンロードアーカイブパスを抽出する
 
-    --no-download-archiveが含まれる、または--download-archiveが省略されている場合は
-    Noneを返す(アーカイブ無効)
+    --no-download-archiveと--download-archiveが両方含まれる場合は
+    yt-dlp本体のlast-wins仕様に従い最後に出現した方を採用する
+    空文字列または空白のみのパスは無効として扱う
 
     Args:
         yt_dlp_options: yt-dlpに渡すオプションリスト
+        parsed: 事前にパース済みのOptionDict 省略時は内部で再パースする
 
     Returns:
-        --download-archiveのパス。無効化されている場合はNone
+        --download-archiveのパス 無効化されている場合はNone
     """
-    parsed = _parse_option_list(yt_dlp_options)
-    if "--no-download-archive" in parsed:
-        return None
+    if parsed is None:
+        parsed = _parse_option_list(yt_dlp_options)
     values = parsed.get("--download-archive")
+    has_disable = "--no-download-archive" in parsed
+
+    if has_disable and values:
+        disable_idx = max(
+            (i for i, v in enumerate(yt_dlp_options) if v == "--no-download-archive"),
+            default=-1,
+        )
+        archive_idx = max(
+            (i for i, v in enumerate(yt_dlp_options) if v == "--download-archive"),
+            default=-1,
+        )
+        if disable_idx > archive_idx:
+            return None
+    elif has_disable:
+        return None
+
     if not values:
         return None
-    return Path(values[-1])
+    path_str = values[-1]
+    if not path_str.strip():
+        return None
+    return Path(path_str)
 
 
 def parse_args() -> ParsedArgs:
@@ -328,22 +353,29 @@ class VideoDownloader:
         logger: logging.Logger,
         *,
         normalize: bool = True,
+        parsed_options: Mapping[str, list[str] | None] | None = None,
     ) -> None:
         """インスタンスを初期化する
 
         yt_dlp.parse_options()はコンストラクタで一度だけ実行され、
-        結果は全てのdownload()呼び出しで再利用される。
-        オプションの動的変更が必要な場合は新しいインスタンスを作成すること。
+        結果は全てのdownload()呼び出しで再利用される
+        オプションの動的変更が必要な場合は新しいインスタンスを作成すること
 
         Args:
             yt_dlp_options: yt-dlpに渡すオプションリスト
             logger: ロガーインスタンス
             normalize: Trueの場合、ダウンロード後に音量を正規化する
+            parsed_options: 事前にパース済みのOptionDict 省略時は内部で再パースする
 
         Raises:
             OSError: ダウンロードディレクトリの作成に失敗した場合
         """
         self._yt_dlp_options = yt_dlp_options
+        self._parsed_options = (
+            parsed_options
+            if parsed_options is not None
+            else _parse_option_list(yt_dlp_options)
+        )
         self._ydl_opts = yt_dlp.parse_options(yt_dlp_options).ydl_opts
         self._logger = logger
         self._normalize = normalize
@@ -357,8 +389,7 @@ class VideoDownloader:
 
     def _resolve_download_dir(self) -> Path:
         """オプションからダウンロードディレクトリを解決する"""
-        parsed = _parse_option_list(self._yt_dlp_options)
-        p_values = parsed.get("-P")
+        p_values = self._parsed_options.get("-P")
         return Path(p_values[-1] if p_values else str(DOWNLOAD_DIR))
 
     def download(self, url: str) -> None:
@@ -416,7 +447,7 @@ class YtDlpMonitorApp:
         """ワーカースレッド: キューからURLを取得してダウンロードを実行する
 
         daemonスレッドとして実行され、キューからURLを取り出し
-        downloaderでダウンロードを実行する。メインスレッド終了時に自動終了する。
+        downloaderでダウンロードを実行する メインスレッド終了時に自動終了する
         """
         while True:
             url = self._queue.dequeue()
@@ -486,6 +517,7 @@ def ensure_download_archive(archive_file: Path, logger: logging.Logger) -> None:
     symlinkとしてリンク先が存在する場合のみ正常と見なす
     リンク切れはyt-dlp書き込み時に必ず失敗するため、起動時点で中止する
     symlinkでない実ファイルやファイル未作成の場合は警告のみ出力して続行する
+    親ディレクトリが存在しない、または書き込み権限がない場合は中止する
 
     Args:
         archive_file: ダウンロードアーカイブファイルのパス
@@ -498,6 +530,20 @@ def ensure_download_archive(archive_file: Path, logger: logging.Logger) -> None:
             "アーカイブsymlinkのリンク先が存在しません: %s -> %s",
             archive_file,
             archive_file.readlink(),
+        )
+        sys.exit(1)
+
+    parent = archive_file.parent
+    if not parent.is_dir():
+        logger.error(
+            "アーカイブファイルの親ディレクトリが存在しません: %s",
+            parent,
+        )
+        sys.exit(1)
+    if not os.access(parent, os.W_OK):
+        logger.error(
+            "アーカイブファイルの親ディレクトリに書き込み権限がありません: %s",
+            parent,
         )
         sys.exit(1)
 
@@ -530,12 +576,16 @@ def is_valid_url(text: str) -> bool:
 if __name__ == "__main__":
     parsed = parse_args()
     logger = setup_logger()
-    archive_path = _resolve_archive_path(parsed.yt_dlp_options)
+    parsed_options = _parse_option_list(parsed.yt_dlp_options)
+    archive_path = _resolve_archive_path(parsed.yt_dlp_options, parsed=parsed_options)
     if archive_path is not None:
         ensure_download_archive(archive_path, logger)
     watcher = ClipboardWatcher()
     downloader = VideoDownloader(
-        parsed.yt_dlp_options, logger, normalize=parsed.normalize
+        parsed.yt_dlp_options,
+        logger,
+        normalize=parsed.normalize,
+        parsed_options=parsed_options,
     )
     app = YtDlpMonitorApp(
         watcher=watcher,

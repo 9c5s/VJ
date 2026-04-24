@@ -64,7 +64,7 @@ class FakeDownloader:
         self._fail_urls = fail_urls or set()
 
     def download(self, url: str) -> None:
-        """URLをダウンロードする。fail_urlsに含まれる場合はRuntimeErrorを送出する"""
+        """URLをダウンロードする fail_urlsに含まれる場合はRuntimeErrorを送出する"""
         if url in self._fail_urls:
             raise RuntimeError("simulated failure")
         self.downloaded.append(url)
@@ -399,6 +399,41 @@ class TestResolveArchivePath:
         opts = merge_yt_dlp_options(["--download-archive"])
         result = _resolve_archive_path(opts)
         assert result is None
+
+    def test_returns_none_for_empty_string_path(self) -> None:
+        """空文字列のパスはNoneとして扱われる"""
+        result = _resolve_archive_path(["--download-archive", ""])
+        assert result is None
+
+    def test_returns_none_for_whitespace_only_path(self) -> None:
+        """空白のみのパスはNoneとして扱われる"""
+        result = _resolve_archive_path(["--download-archive", "   "])
+        assert result is None
+
+    def test_disable_after_archive_returns_none(self) -> None:
+        """--download-archiveの後に--no-download-archiveがある場合は無効化される"""
+        result = _resolve_archive_path([
+            "--download-archive",
+            "/path/a.txt",
+            "--no-download-archive",
+        ])
+        assert result is None
+
+    def test_archive_after_disable_returns_path(self) -> None:
+        """--no-download-archiveの後に--download-archiveがある場合は有効"""
+        result = _resolve_archive_path([
+            "--no-download-archive",
+            "--download-archive",
+            "/path/a.txt",
+        ])
+        assert result == Path("/path/a.txt")
+
+    def test_uses_provided_parsed_options(self) -> None:
+        """事前パース済みOptionDictを渡すとrawオプションを再パースせずに使用する"""
+        raw = ["--download-archive", "/ignored/path.txt"]
+        injected = _parse_option_list(["--download-archive", "/injected/path.txt"])
+        result = _resolve_archive_path(raw, parsed=injected)
+        assert result == Path("/injected/path.txt")
 
 
 class TestParseArgs:
@@ -950,7 +985,7 @@ class TestEnsureDownloadArchive:
         return logging.getLogger(self._LOGGER_NAME)
 
     def _make_symlink(self, link: Path, target: Path) -> None:
-        """symlinkを作成する。作成不能な環境ではテストをスキップする"""
+        """symlinkを作成する 作成不能な環境ではテストをスキップする"""
         try:
             link.symlink_to(target)
         except NotImplementedError, OSError:
@@ -1009,3 +1044,18 @@ class TestEnsureDownloadArchive:
         with caplog.at_level(logging.WARNING, logger=self._LOGGER_NAME):
             ensure_download_archive(archive, self._logger())
         assert "存在しません" in caplog.text
+
+    def test_exits_when_parent_directory_missing(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """親ディレクトリが存在しない場合、エラーログを出してSystemExit(1)する"""
+        archive = tmp_path / "nonexistent_dir" / "downloaded.txt"
+        with (
+            caplog.at_level(logging.ERROR, logger=self._LOGGER_NAME),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            ensure_download_archive(archive, self._logger())
+        assert exc_info.value.code == 1
+        assert "親ディレクトリが存在しません" in caplog.text
