@@ -565,12 +565,6 @@ def ensure_download_archive(archive_file: Path, logger: logging.Logger) -> None:
             parent,
         )
         sys.exit(1)
-    if not os.access(parent, os.W_OK):
-        logger.error(
-            "アーカイブファイルの親ディレクトリに書き込み権限がありません: %s",
-            parent,
-        )
-        sys.exit(1)
 
     if archive_file.exists():
         if not archive_file.is_file():
@@ -584,6 +578,14 @@ def ensure_download_archive(archive_file: Path, logger: logging.Logger) -> None:
             sys.exit(1)
         logger.warning("アーカイブファイルがsymlinkではありません: %s", archive_file)
         return
+
+    # ファイル未作成時のみ新規作成のためのparent書き込み権限を要求する
+    if not os.access(parent, os.W_OK):
+        logger.error(
+            "アーカイブファイルの親ディレクトリに書き込み権限がありません: %s",
+            parent,
+        )
+        sys.exit(1)
 
     logger.warning(
         "アーカイブファイルが存在しません: %s (実行時に通常ファイルとして作成されます)",
@@ -620,6 +622,9 @@ if __name__ == "__main__":
         parsed_options=parsed_options,
     )
     if archive_path is not None:
+        if archive_path == DOWNLOAD_ARCHIVE_FILE:
+            # -P変更時にVideoDownloaderがDOWNLOAD_DIRを作らない場合に備え事前作成
+            DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
         ensure_download_archive(archive_path, logger)
     app = YtDlpMonitorApp(
         watcher=watcher,

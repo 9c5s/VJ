@@ -1178,3 +1178,21 @@ class TestEnsureDownloadArchive:
             assert "書き込み権限がありません" in caplog.text
         finally:
             target.chmod(0o644)
+
+    def test_allows_existing_file_when_parent_not_writable(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """既存ファイルがあれば親ディレクトリが書き込み不可でも警告のみで続行する"""
+        archive = tmp_path / "archive.txt"
+        archive.write_text("")
+        tmp_path.chmod(0o555)
+        try:
+            if os.access(tmp_path, os.W_OK):
+                pytest.skip("親ディレクトリを書き込み不可に設定できない環境")
+            with caplog.at_level(logging.WARNING, logger=self._LOGGER_NAME):
+                ensure_download_archive(archive, self._logger())
+            assert "symlinkではありません" in caplog.text
+        finally:
+            tmp_path.chmod(0o755)
