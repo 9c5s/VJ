@@ -2,7 +2,8 @@
 # /// script
 # requires-python = ">=3.14"
 # dependencies = [
-#     "yt-dlp-audio-normalize>=0.3.0",
+#     "yt-dlp",
+#     "yt-dlp-audio-normalize",
 # ]
 # ///
 """音量正規化スクリプト
@@ -27,7 +28,11 @@ def _ensure_dependencies() -> None:
     except ModuleNotFoundError:
         has_plugin = False
 
-    if find_spec("ffmpeg_normalize") is not None and has_plugin:
+    if (
+        find_spec("ffmpeg_normalize") is not None
+        and find_spec("yt_dlp") is not None
+        and has_plugin
+    ):
         return
 
     import subprocess  # noqa: PLC0415
