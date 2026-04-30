@@ -60,9 +60,6 @@ YT_DLP_OPTIONS: Final[list[str]] = [
     str(DOWNLOAD_DIR),
     "-o",
     "%(title)s_%(id)s",
-    "--write-thumbnail",
-    "--convert-thumbnails",
-    "png",
     "--ppa",
     "Merger+ffmpeg_o1:-map_metadata -1",
     "--ppa",
@@ -73,6 +70,12 @@ YT_DLP_OPTIONS: Final[list[str]] = [
     "firefox",
     "--download-archive",
     str(DOWNLOAD_ARCHIVE_FILE),
+]
+# サムネイル取得関連オプション --thumbnail指定時のみ有効化する
+THUMBNAIL_OPTIONS: Final[list[str]] = [
+    "--write-thumbnail",
+    "--convert-thumbnails",
+    "png",
 ]
 
 
@@ -232,6 +235,11 @@ def parse_args() -> ParsedArgs:
         help="ダウンロード後の音量正規化をスキップする",
     )
     parser.add_argument(
+        "--thumbnail",
+        action="store_true",
+        help="サムネイル画像を保存しpngへ変換する (デフォルト: 無効)",
+    )
+    parser.add_argument(
         "yt_dlp_args",
         nargs=argparse.REMAINDER,
         help="yt-dlpオプション (-- の後に指定)",
@@ -242,6 +250,11 @@ def parse_args() -> ParsedArgs:
     overrides = args.yt_dlp_args
     if overrides and overrides[0] == "--":
         overrides = overrides[1:]
+
+    # --thumbnail指定時はサムネイル関連オプションを先頭へ追加する
+    # 後続のCLI override(--no-write-thumbnail等)があればそちらが優先される
+    if args.thumbnail:
+        overrides = [*THUMBNAIL_OPTIONS, *overrides]
 
     if not overrides:
         yt_dlp_options = list(YT_DLP_OPTIONS)

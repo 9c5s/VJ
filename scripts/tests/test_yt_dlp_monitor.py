@@ -28,6 +28,7 @@ import pytest
 from yt_dlp_monitor import (
     DOWNLOAD_ARCHIVE_FILE,
     DOWNLOAD_DIR,
+    THUMBNAIL_OPTIONS,
     YT_DLP_OPTIONS,
     DownloadQueue,
     _dict_to_option_list,
@@ -362,16 +363,15 @@ class TestYtDlpOptionsDefaults:
         parsed = _parse_option_list(YT_DLP_OPTIONS)
         assert parsed["-o"] == ["%(title)s_%(id)s"]
 
-    def test_write_thumbnail_enabled_by_default(self) -> None:
-        """サムネイル書き出しがデフォルトで有効になっている"""
+    def test_write_thumbnail_disabled_by_default(self) -> None:
+        """サムネイル書き出しはデフォルトで無効になっている"""
         parsed = _parse_option_list(YT_DLP_OPTIONS)
-        assert "--write-thumbnail" in parsed
-        assert parsed["--write-thumbnail"] is None
+        assert "--write-thumbnail" not in parsed
 
-    def test_convert_thumbnails_to_png(self) -> None:
-        """サムネイル変換形式がpngに指定されている"""
+    def test_convert_thumbnails_disabled_by_default(self) -> None:
+        """サムネイル変換はデフォルトで指定されていない"""
         parsed = _parse_option_list(YT_DLP_OPTIONS)
-        assert parsed.get("--convert-thumbnails") == ["png"]
+        assert "--convert-thumbnails" not in parsed
 
     def test_ppa_contains_merger_strip_metadata(self) -> None:
         """--ppaにMergerのメタデータ除去設定が含まれる"""
@@ -401,6 +401,21 @@ class TestYtDlpOptionsDefaults:
         """--download-archiveがDOWNLOAD_ARCHIVE_FILE定数を指している"""
         parsed = _parse_option_list(YT_DLP_OPTIONS)
         assert parsed["--download-archive"] == [str(DOWNLOAD_ARCHIVE_FILE)]
+
+
+class TestThumbnailOptions:
+    """THUMBNAIL_OPTIONS: サムネイル関連オプションの内容検証"""
+
+    def test_contains_write_thumbnail_flag(self) -> None:
+        """--write-thumbnailフラグが含まれる"""
+        parsed = _parse_option_list(THUMBNAIL_OPTIONS)
+        assert "--write-thumbnail" in parsed
+        assert parsed["--write-thumbnail"] is None
+
+    def test_converts_thumbnails_to_png(self) -> None:
+        """サムネイル変換形式がpngに指定されている"""
+        parsed = _parse_option_list(THUMBNAIL_OPTIONS)
+        assert parsed.get("--convert-thumbnails") == ["png"]
 
 
 class TestResolveArchivePath:
@@ -574,6 +589,47 @@ class TestParseArgs:
         monkeypatch.setattr(sys, "argv", ["yt_dlp_monitor.py", "--", "-f", "bv+ba"])
         result = parse_args()
         parsed = _parse_option_list(result.yt_dlp_options)
+        assert parsed["-f"] == ["bv+ba"]
+
+    def test_default_does_not_include_thumbnail_options(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """引数なしの場合、サムネイル関連オプションは含まれない"""
+        monkeypatch.setattr(sys, "argv", ["yt_dlp_monitor.py"])
+        result = parse_args()
+        parsed = _parse_option_list(result.yt_dlp_options)
+        assert "--write-thumbnail" not in parsed
+        assert "--convert-thumbnails" not in parsed
+
+    def test_thumbnail_flag_enables_write_thumbnail(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--thumbnail指定時、--write-thumbnailが追加される"""
+        monkeypatch.setattr(sys, "argv", ["yt_dlp_monitor.py", "--thumbnail"])
+        result = parse_args()
+        parsed = _parse_option_list(result.yt_dlp_options)
+        assert "--write-thumbnail" in parsed
+        assert parsed["--write-thumbnail"] is None
+
+    def test_thumbnail_flag_sets_convert_thumbnails_to_png(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--thumbnail指定時、--convert-thumbnails pngが追加される"""
+        monkeypatch.setattr(sys, "argv", ["yt_dlp_monitor.py", "--thumbnail"])
+        result = parse_args()
+        parsed = _parse_option_list(result.yt_dlp_options)
+        assert parsed.get("--convert-thumbnails") == ["png"]
+
+    def test_thumbnail_flag_with_yt_dlp_args(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--thumbnailとyt-dlp引数併用時、両方が反映される"""
+        monkeypatch.setattr(
+            sys, "argv", ["yt_dlp_monitor.py", "--thumbnail", "--", "-f", "bv+ba"]
+        )
+        result = parse_args()
+        parsed = _parse_option_list(result.yt_dlp_options)
+        assert "--write-thumbnail" in parsed
         assert parsed["-f"] == ["bv+ba"]
 
 
