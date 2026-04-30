@@ -71,7 +71,7 @@ YT_DLP_OPTIONS: Final[list[str]] = [
     "--download-archive",
     str(DOWNLOAD_ARCHIVE_FILE),
 ]
-# サムネイル取得関連オプション --thumbnail指定時のみ有効化する
+# サムネイル取得関連オプション YT_DLP_OPTIONSとは分離し、--thumbnail指定時のみ有効化する
 THUMBNAIL_OPTIONS: Final[list[str]] = [
     "--write-thumbnail",
     "--convert-thumbnails",
