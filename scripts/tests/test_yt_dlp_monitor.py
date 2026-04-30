@@ -632,6 +632,25 @@ class TestParseArgs:
         assert "--write-thumbnail" in parsed
         assert parsed["-f"] == ["bv+ba"]
 
+    def test_thumbnail_flag_followed_by_no_write_thumbnail_override(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--thumbnail後に-- --no-write-thumbnailを渡すと打ち消し意図が反映される
+
+        parse_args()は両者をyt_dlp_optionsに含めるが、--no-write-thumbnailが
+        --write-thumbnailより後に出現することで、yt-dlp本体のlast-wins仕様により
+        最終的にサムネイル書き出しが無効化される
+        """
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["yt_dlp_monitor.py", "--thumbnail", "--", "--no-write-thumbnail"],
+        )
+        result = parse_args()
+        write_idx = result.yt_dlp_options.index("--write-thumbnail")
+        no_write_idx = result.yt_dlp_options.index("--no-write-thumbnail")
+        assert no_write_idx > write_idx
+
 
 class TestDownloadQueue:
     """DownloadQueue: URL用FIFOキューと重複排除"""
