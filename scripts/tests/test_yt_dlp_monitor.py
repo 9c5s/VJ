@@ -651,6 +651,18 @@ class TestParseArgs:
         no_write_idx = result.yt_dlp_options.index("--no-write-thumbnail")
         assert no_write_idx > write_idx
 
+    def test_thumbnail_and_no_normalize_flags_coexist(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--thumbnailと--no-normalizeを併用すると両フラグが独立に反映される"""
+        monkeypatch.setattr(
+            sys, "argv", ["yt_dlp_monitor.py", "--thumbnail", "--no-normalize"]
+        )
+        result = parse_args()
+        parsed = _parse_option_list(result.yt_dlp_options)
+        assert "--write-thumbnail" in parsed
+        assert result.normalize is False
+
 
 class TestDownloadQueue:
     """DownloadQueue: URL用FIFOキューと重複排除"""
