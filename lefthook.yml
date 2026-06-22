@@ -1,5 +1,6 @@
 colors: false
 no_tty: true
+glob_matcher: doublestar
 
 pre-commit:
   parallel: true
