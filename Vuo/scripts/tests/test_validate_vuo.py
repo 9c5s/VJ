@@ -165,15 +165,14 @@ class TestBuildNodePorts:
         nodes = {"A": pydot.Node("A")}
         ports, warnings = _build_node_ports(nodes)
         assert ports == {"A": set()}
-        assert len(warnings) == 1
-        assert "A" in warnings[0]
+        assert warnings == ["node 'A': label has no <portId> markers (''...)"]
 
     def test_node_with_label_but_no_markers_generates_warning(self) -> None:
         """labelはあるがポートマーカーが無いノードも警告"""
         nodes = {"A": pydot.Node("A", label='"PlainLabel"')}
         ports, warnings = _build_node_ports(nodes)
         assert ports == {"A": set()}
-        assert len(warnings) == 1
+        assert warnings == ["node 'A': label has no <portId> markers ('PlainLabel'...)"]
 
 
 class TestValidateEdges:
@@ -189,29 +188,34 @@ class TestValidateEdges:
         """sourceにポート指定が無いとエラー"""
         edges = [pydot.Edge("A", "B:in")]
         node_ports = {"A": {"out"}, "B": {"in"}}
-        errors = _validate_edges(edges, node_ports)
-        assert any("has no port" in e and "source" in e for e in errors)
+        assert _validate_edges(edges, node_ports) == [
+            "edge source 'A' has no port (expected Node:port)",
+        ]
 
     def test_edge_with_unknown_source_node(self) -> None:
         """未宣言のノードを参照するエッジはエラー"""
         edges = [pydot.Edge("Unknown:out", "B:in")]
         node_ports = {"B": {"in"}}
-        errors = _validate_edges(edges, node_ports)
-        assert any("unknown node 'Unknown'" in e for e in errors)
+        assert _validate_edges(edges, node_ports) == [
+            "edge source references unknown node 'Unknown'",
+        ]
 
     def test_edge_with_port_not_in_node_label(self) -> None:
         """ノードのlabelに無いポートを参照するエッジはエラー"""
         edges = [pydot.Edge("A:nonexistent", "B:in")]
         node_ports = {"A": {"out"}, "B": {"in"}}
-        errors = _validate_edges(edges, node_ports)
-        assert any("nonexistent" in e and "not in node label" in e for e in errors)
+        assert _validate_edges(edges, node_ports) == [
+            "edge source A:'nonexistent' - port not in node label (declared: ['out'])",
+        ]
 
     def test_multiple_errors_in_one_edge(self) -> None:
         """sourceとdestの両方に問題があれば両方エラー"""
         edges = [pydot.Edge("A", "B")]
         node_ports = {"A": {"out"}, "B": {"in"}}
-        errors = _validate_edges(edges, node_ports)
-        assert len(errors) == 2
+        assert _validate_edges(edges, node_ports) == [
+            "edge source 'A' has no port (expected Node:port)",
+            "edge dest 'B' has no port (expected Node:port)",
+        ]
 
 
 class TestHasTyped:
@@ -290,8 +294,11 @@ class TestDetectProtocol:
         po = pydot.Node("PublishedOutputs", label='"PO"')
         proto, errors = _detect_protocol(pi, po)
         assert proto is None
-        assert len(errors) == 1
-        assert "No protocol matched" in errors[0]
+        assert errors == [
+            "No protocol matched and no PublishedOutputs. "
+            "Required: Image Filter / Image Generator / "
+            "or at least one published output for plugin",
+        ]
 
 
 class TestParseDot:
@@ -311,6 +318,18 @@ class TestParseDot:
         """空文字列はNoneを返す"""
         result = _parse_dot("")
         assert result is None
+
+    def test_returns_none_when_pydot_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """pydot.graph_from_dot_data が例外を投げた場合 None を返す"""
+
+        def _raise(_: str) -> None:
+            msg = "simulated pydot failure"
+            raise RuntimeError(msg)
+
+        monkeypatch.setattr(pydot, "graph_from_dot_data", _raise)
+        assert _parse_dot("anything") is None
 
 
 class TestValidate:
@@ -353,8 +372,8 @@ class TestValidate:
         assert validate(f) == 1
 
 
-class TestSetupLogger:
-    """setup_logger: モジュールロガー初期化"""
+class _LoggerCleanup:
+    """ロガー副作用のあるテストクラス用ミックスイン"""
 
     @pytest.fixture(autouse=True)
     def _cleanup_logger(self) -> Iterator[None]:
@@ -367,6 +386,10 @@ class TestSetupLogger:
         for h in saved:
             logger.addHandler(h)
         logger.setLevel(saved_level)
+
+
+class TestSetupLogger(_LoggerCleanup):
+    """setup_logger: モジュールロガー初期化"""
 
     def test_adds_handler_when_none(self) -> None:
         """ハンドラ未設定時にStreamHandlerが追加される"""
@@ -384,20 +407,8 @@ class TestSetupLogger:
         assert logger.handlers == [existing]
 
 
-class TestMain:
+class TestMain(_LoggerCleanup):
     """main: CLIエントリポイント"""
-
-    @pytest.fixture(autouse=True)
-    def _cleanup_logger(self) -> Iterator[None]:
-        """テスト前後でモジュールロガーのハンドラを初期化する"""
-        saved = logger.handlers[:]
-        saved_level = logger.level
-        logger.handlers.clear()
-        yield
-        logger.handlers.clear()
-        for h in saved:
-            logger.addHandler(h)
-        logger.setLevel(saved_level)
 
     def test_returns_zero_for_valid_file(self, tmp_path: Path) -> None:
         """有効な.vuoを引数に渡すとreturn 0"""
@@ -405,10 +416,16 @@ class TestMain:
         f.write_text(VDMX_PLUGIN_DOT, encoding="utf-8")
         assert main(["validate_vuo.py", str(f)]) == 0
 
-    def test_returns_two_for_wrong_argc(self) -> None:
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["validate_vuo.py"],
+            ["validate_vuo.py", "a", "b"],
+        ],
+    )
+    def test_returns_two_for_wrong_argc(self, argv: list[str]) -> None:
         """引数の数が違うとreturn 2"""
-        assert main(["validate_vuo.py"]) == 2
-        assert main(["validate_vuo.py", "a", "b"]) == 2
+        assert main(argv) == 2
 
     def test_invalid_dot_file_returns_one(self, tmp_path: Path) -> None:
         """不正なDOTファイルを引数に渡すとreturn 1"""
