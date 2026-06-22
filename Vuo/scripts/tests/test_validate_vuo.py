@@ -146,6 +146,16 @@ class TestExtractNodes:
         g = pydot.Dot()
         assert _extract_nodes(g) == {}
 
+    def test_excludes_quoted_reserved_keys(self) -> None:
+        """ダブルクォート付きの予約名("node"等)も除外される"""
+        g = pydot.Dot()
+        g.add_node(pydot.Node("Real"))
+        g.add_node(pydot.Node('"node"'))
+        g.add_node(pydot.Node('"edge"'))
+        g.add_node(pydot.Node('"graph"'))
+        result = _extract_nodes(g)
+        assert set(result.keys()) == {"Real"}
+
 
 class TestBuildNodePorts:
     """_build_node_ports: 各ノードのポートID集合と警告を構築"""
@@ -319,6 +329,16 @@ class TestParseDot:
         result = _parse_dot("")
         assert result is None
 
+    def test_rejects_trailing_text_after_closing_brace(self) -> None:
+        """グラフ末尾の } 以降に非空白があれば拒否する"""
+        result = _parse_dot("digraph G { A -> B; }\n<<<<<<< HEAD\nleftover")
+        assert result is None
+
+    def test_allows_only_whitespace_after_closing_brace(self) -> None:
+        """末尾に空白/改行のみあれば受け入れる"""
+        result = _parse_dot("digraph G { A -> B; }\n\n   \n")
+        assert result is not None
+
     def test_returns_none_when_pydot_raises(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -369,6 +389,17 @@ class TestValidate:
         """出力ポート無しでプロトコル検出失敗するとreturn 1"""
         f = tmp_path / "noout.vuo"
         f.write_text(NO_OUTPUT_DOT, encoding="utf-8")
+        assert validate(f) == 1
+
+    def test_missing_file_returns_one(self, tmp_path: Path) -> None:
+        """存在しないファイルを渡すと未捕捉例外でクラッシュせず return 1"""
+        nonexistent = tmp_path / "does_not_exist.vuo"
+        assert validate(nonexistent) == 1
+
+    def test_invalid_utf8_returns_one(self, tmp_path: Path) -> None:
+        """UTF-8として不正なファイルは return 1(クラッシュしない)"""
+        f = tmp_path / "binary.vuo"
+        f.write_bytes(b"\xff\xfe\x00\x01invalid")
         assert validate(f) == 1
 
 

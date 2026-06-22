@@ -87,11 +87,13 @@ def get_attr(obj: pydot.Common, key: str) -> str | None:
 
 def _extract_nodes(graph: pydot.Dot) -> dict[str, pydot.Node]:
     """グラフから予約名以外のノードを名前→オブジェクトの辞書として返す"""
-    return {
-        n.get_name().strip('"'): n
-        for n in graph.get_nodes()
-        if n.get_name() not in RESERVED_NODE_KEYS
-    }
+    extracted: dict[str, pydot.Node] = {}
+    for n in graph.get_nodes():
+        name = n.get_name().strip('"')
+        if name in RESERVED_NODE_KEYS:
+            continue
+        extracted[name] = n
+    return extracted
 
 
 def _build_node_ports(
@@ -189,6 +191,10 @@ def _parse_dot(text: str) -> pydot.Dot | None:
     if not graphs:
         logger.error("[FAIL] pydot returned no graphs")
         return None
+    last_brace = text.rfind("}")
+    if last_brace == -1 or text[last_brace + 1 :].strip():
+        logger.error("[FAIL] unexpected trailing content after DOT graph")
+        return None
     return graphs[0]
 
 
@@ -201,7 +207,11 @@ def validate(path: Path) -> int:
     Returns:
         終了コード(0=成功、1=失敗)
     """
-    text = path.read_text(encoding="utf-8")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError, UnicodeDecodeError:
+        logger.exception("[FAIL] cannot read file: %s", path)
+        return 1
     logger.info("== Validating: %s (%d bytes)", path, len(text))
 
     g = _parse_dot(text)
