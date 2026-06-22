@@ -261,6 +261,12 @@ class TestValidateEdges:
             "edge dest B:'out' - expected '\\l' port but found '\\r'",
         ]
 
+    def test_quoted_node_endpoint_is_normalized(self) -> None:
+        """Quote 付きの ``"NodeName":port`` を分割後に正規化して照合する"""
+        edges = [pydot.Edge('"Quoted Name":out', '"Quoted Name":in')]
+        node_ports = {"Quoted Name": {"in": "l", "out": "r"}}
+        assert _validate_edges(edges, node_ports) == []
+
 
 class TestHasTyped:
     """_has_typed: ノードの _{port}_type 属性チェック"""

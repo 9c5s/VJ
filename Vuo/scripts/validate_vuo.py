@@ -101,13 +101,15 @@ def _validate_edges(
     errors: list[str] = []
     expected_dir = {"source": "r", "dest": "l"}
     for e in edges:
-        src_full = str(e.get_source()).strip('"')
-        dst_full = str(e.get_destination()).strip('"')
+        src_full = str(e.get_source())
+        dst_full = str(e.get_destination())
         for end, full in (("source", src_full), ("dest", dst_full)):
             if ":" not in full:
                 errors.append(f"edge {end} {full!r} has no port (expected Node:port)")
                 continue
-            node_name, port = full.split(":", 1)
+            raw_node, raw_port = full.split(":", 1)
+            node_name = raw_node.strip('"')
+            port = raw_port.strip('"')
             if node_name not in node_ports:
                 errors.append(f"edge {end} references unknown node {node_name!r}")
                 continue
