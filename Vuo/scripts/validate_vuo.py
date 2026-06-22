@@ -1,6 +1,5 @@
-#!/usr/bin/env python
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.14"
 # dependencies = ["pydot>=3.0"]
 # ///
 """Vuoコンポジション(.vuo) DOTファイルの静的検証ツール
@@ -44,9 +43,12 @@ EXPECTED_ARGV_LEN: Final[int] = 2
 RESERVED_NODE_KEYS: Final[frozenset[str]] = frozenset({"node", "edge", "graph"})
 
 
-def parse_label_ports(label: str) -> set[str]:
-    r"""ノードlabel ``Display|<portId>portName\l|...`` からポートID集合を抽出する"""
-    return set(re.findall(r"<([^>]+)>", label))
+def parse_label_ports(label: str) -> dict[str, str]:
+    r"""ノードlabel ``Display|<portId>portName\l|...`` から port_id -> 方向 を返す
+
+    方向 ``l`` (左/入力) ``r`` (右/出力) はケーブル向きの検証に使う
+    """
+    return dict(re.findall(r"<([^>]+)>[^|]*?\\([lr])", label))
 
 
 def get_attr(obj: pydot.Common, key: str) -> str | None:
@@ -73,9 +75,9 @@ def _extract_nodes(graph: pydot.Dot) -> dict[str, pydot.Node]:
 
 def _build_node_ports(
     nodes: dict[str, pydot.Node],
-) -> tuple[dict[str, set[str]], list[str]]:
-    """各ノードのlabelからポートID集合を構築し警告を集約する"""
-    node_ports: dict[str, set[str]] = {}
+) -> tuple[dict[str, dict[str, str]], list[str]]:
+    """各ノードのlabelから port_id -> 方向 マップを構築し警告を集約する"""
+    node_ports: dict[str, dict[str, str]] = {}
     warnings: list[str] = []
     for name, n in nodes.items():
         label = get_attr(n, "label") or ""
@@ -89,10 +91,15 @@ def _build_node_ports(
 
 def _validate_edges(
     edges: list[pydot.Edge],
-    node_ports: dict[str, set[str]],
+    node_ports: dict[str, dict[str, str]],
 ) -> list[str]:
-    """エッジの参照ノード/ポートが宣言済みかを検証する"""
+    r"""エッジの参照ノード/ポート/向きを検証する
+
+    source 側ポートは ``\r``(出力)、dest 側ポートは ``\l``(入力)でなければならない
+    逆向きケーブル(corrupted composition)を検出するために向きまでチェックする
+    """
     errors: list[str] = []
+    expected_dir = {"source": "r", "dest": "l"}
     for e in edges:
         src_full = str(e.get_source()).strip('"')
         dst_full = str(e.get_destination()).strip('"')
@@ -104,10 +111,18 @@ def _validate_edges(
             if node_name not in node_ports:
                 errors.append(f"edge {end} references unknown node {node_name!r}")
                 continue
-            if port not in node_ports[node_name]:
+            direction = node_ports[node_name].get(port)
+            if direction is None:
                 errors.append(
                     f"edge {end} {node_name}:{port!r} - port not in node label "
                     f"(declared: {sorted(node_ports[node_name])})"
+                )
+                continue
+            want = expected_dir[end]
+            if direction != want:
+                errors.append(
+                    f"edge {end} {node_name}:{port!r} - "
+                    f"expected '\\{want}' port but found '\\{direction}'"
                 )
     return errors
 
