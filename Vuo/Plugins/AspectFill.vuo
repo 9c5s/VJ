@@ -1,71 +1,72 @@
 /**
  * @file
- * @brief AspectFill v5 - VDMX Plugin with aspect ratio fill via blurred background
+ * @brief AspectFill
+ * A VDMX Plugin that fills any aspect ratio canvas with a blurred background of the source image.
  *
- * Published Inputs:
- *   Image           (VuoImage)         - VDMX source (video or still)
- *   StillImageMode  (VuoBoolean)       - turn ON for still images (R↔B swap)
- *   Width / Height  (VuoInteger)       - driven by VDMX Size field
- *   BlurRadius      (VuoReal, 0..200)  - background blur radius in points
+ * | Published Input | Type | Notes |
+ * |---|---|---|
+ * | Image | VuoImage | VDMX source (video or still) |
+ * | StillImageMode | VuoBoolean | turn ON for still images (R↔B swap) |
+ * | Width / Height | VuoInteger | driven by VDMX Size field |
+ * | BlurRadius | VuoReal (0..200) | background blur radius in points |
  *
- * Published Outputs:
- *   OutputImage     (VuoImage, Width × Height)
+ * Output: `OutputImage` (VuoImage, Width × Height).
  *
- * Install: ~/Library/Application Support/VDMX/plugins/
+ * Install path: `~/Library/Application Support/VDMX/plugins/`
  *
- * @copyright Copyright © 2026
- * @license MIT
+ * @author [9c5s](https://vuo.org/user/2746870)
+ * @version 1.0
+ * @lastSavedInVuoVersion 2.4.6
+ * @copyright Copyright © 2026 [9c5s](https://vuo.org/user/2746870)
+ * @license This composition may be modified and distributed under the terms of the MIT License. For more information, see https://opensource.org/licenses/MIT .
+ * @see This is a Vuo Composition source code file.  See https://vuo.org for further information.
  */
 
 digraph G
 {
+BlurImage [type="vuo.image.blur" version="1.4.2" label="Blur Image|<refresh>refresh\l|<image>image\l|<mask>mask\l|<shape>shape\l|<radius>radius\l|<expandBounds>expandBounds\l|<quality>quality\l|<blurredImage>blurredImage\r" pos="1155,75" _shape="\"linear\"" _expandBounds="false" _quality="1.0"];
+CombineBGR [type="vuo.image.color.combine.rgb" version="1.1.0" label="Combine BGR (R-B swap)|<refresh>refresh\l|<redImage>redImage\l|<greenImage>greenImage\l|<blueImage>blueImage\l|<opacityImage>opacityImage\l|<combinedImage>combinedImage\r" pos="405,300"];
+MakeBgLayer [type="vuo.layer.make.scaled" version="3.1.0" label="Make Bg Layer|<refresh>refresh\l|<image>image\l|<anchor>anchor\l|<center>center\l|<rotation>rotation\l|<width>width\l|<fixed>fixed\l|<opacity>opacity\l|<layer>layer\r" pos="1395,75" _anchor="\{\"horizontalAlignment\":\"center\",\"verticalAlignment\":\"center\"\}" _center="\{\"x\":0.0,\"y\":0.0\}" _rotation="0.0" _width="2.0" _fixed="\"horizontal\"" _opacity="1.0"];
+MakeFgLayer [type="vuo.layer.make.scaled" version="3.1.0" label="Make Fg Layer|<refresh>refresh\l|<image>image\l|<anchor>anchor\l|<center>center\l|<rotation>rotation\l|<width>width\l|<fixed>fixed\l|<opacity>opacity\l|<layer>layer\r" pos="1395,405" _anchor="\{\"horizontalAlignment\":\"center\",\"verticalAlignment\":\"center\"\}" _center="\{\"x\":0.0,\"y\":0.0\}" _rotation="0.0" _width="2.0" _fixed="\"horizontal\"" _opacity="1.0"];
+MakeList [type="vuo.list.make.2.VuoLayer" version="2.0.0" label="Make List|<refresh>refresh\l|<1>1\l|<2>2\l|<list>list\r" pos="1844,251"];
+RenderToImage [type="vuo.layer.render.image2" version="2.0.0" label="Render Layers to Image|<refresh>refresh\l|<layers>layers\l|<width>width\l|<height>height\l|<colorDepth>colorDepth\l|<multisampling>multisampling\l|<image>image\r" pos="1905,240" _colorDepth="\"8bpc\"" _multisampling="\"4\""];
+ResizeFill [type="vuo.image.resize" version="1.1.3" label="Resize Fill|<refresh>refresh\l|<image>image\l|<sizingMode>sizingMode\l|<width>width\l|<height>height\l|<resizedImage>resizedImage\r" pos="900,75" _sizingMode="\"fill\""];
+ResizeFit [type="vuo.image.resize" version="1.1.3" label="Resize Fit|<refresh>refresh\l|<image>image\l|<sizingMode>sizingMode\l|<width>width\l|<height>height\l|<resizedImage>resizedImage\r" pos="900,405" _sizingMode="\"fit\""];
+SelectImage [type="vuo.select.in.boolean.VuoImage" version="2.0.0" label="Select Image|<refresh>refresh\l|<which>which\l|<falseOption>falseOption\l|<trueOption>trueOption\l|<out>out\r" pos="645,150"];
+ShareBlurRadius [type="vuo.data.share.VuoReal" version="1.0.0" label="Share Blur Radius|<refresh>refresh\l|<value>value\l|<sameValue>sameValue\r" pos="900,195"];
+ShareHeight [type="vuo.data.share.VuoInteger" version="1.0.0" label="Share Height|<refresh>refresh\l|<value>value\l|<sameValue>sameValue\r" pos="645,360"];
+ShareStillMode [type="vuo.data.share.VuoBoolean" version="1.0.0" label="Share Still Mode|<refresh>refresh\l|<value>value\l|<sameValue>sameValue\r" pos="405,45"];
+ShareWidth [type="vuo.data.share.VuoInteger" version="1.0.0" label="Share Width|<refresh>refresh\l|<value>value\l|<sameValue>sameValue\r" pos="645,300"];
 SplitRGB [type="vuo.image.color.split.rgb" version="1.1.1" label="Split RGB|<refresh>refresh\l|<image>image\l|<preserveOpacity>preserveOpacity\l|<redImage>redImage\r|<greenImage>greenImage\r|<blueImage>blueImage\r|<opacityImage>opacityImage\r" pos="150,300" _preserveOpacity="true"];
-CombineBGR [type="vuo.image.color.combine.rgb" version="1.1.0" label="Combine BGR (R-B swap)|<refresh>refresh\l|<redImage>redImage\l|<greenImage>greenImage\l|<blueImage>blueImage\l|<opacityImage>opacityImage\l|<combinedImage>combinedImage\r" pos="400,300"];
-SelectImage [type="vuo.select.in.boolean.VuoImage" version="2.0.0" label="Select Image|<refresh>refresh\l|<which>which\l|<falseOption>falseOption\l|<trueOption>trueOption\l|<out>out\r" pos="650,150"];
-ResizeFill [type="vuo.image.resize" version="1.1.3" label="Resize Fill|<refresh>refresh\l|<image>image\l|<sizingMode>sizingMode\l|<width>width\l|<height>height\l|<resizedImage>resizedImage\r" pos="900,80" _sizingMode="\"fill\"" _width="1920" _height="1080"];
-ResizeFit [type="vuo.image.resize" version="1.1.3" label="Resize Fit|<refresh>refresh\l|<image>image\l|<sizingMode>sizingMode\l|<width>width\l|<height>height\l|<resizedImage>resizedImage\r" pos="900,400" _sizingMode="\"fit\"" _width="1920" _height="1080"];
-BlurImage [type="vuo.image.blur" version="1.4.1" label="Blur Image|<refresh>refresh\l|<image>image\l|<mask>mask\l|<shape>shape\l|<radius>radius\l|<expandBounds>expandBounds\l|<quality>quality\l|<blurredImage>blurredImage\r" pos="1150,80" _shape="\"linear\"" _radius="30.0" _expandBounds="false" _quality="1.0"];
-ShareBlurRadius [type="vuo.data.share.VuoReal" version="1.0.0" label="Share Blur Radius|<refresh>refresh\l|<value>value\l|<sameValue>sameValue\r" pos="900,200"];
-ShareStillMode [type="vuo.data.share.VuoBoolean" version="1.0.0" label="Share Still Mode|<refresh>refresh\l|<value>value\l|<sameValue>sameValue\r" pos="400,50"];
-ShareWidth [type="vuo.data.share.VuoInteger" version="1.0.0" label="Share Width|<refresh>refresh\l|<value>value\l|<sameValue>sameValue\r" pos="650,300"];
-ShareHeight [type="vuo.data.share.VuoInteger" version="1.0.0" label="Share Height|<refresh>refresh\l|<value>value\l|<sameValue>sameValue\r" pos="650,360"];
-MakeBgLayer [type="vuo.layer.make.scaled" version="3.1.0" label="Make Bg Layer|<refresh>refresh\l|<image>image\l|<anchor>anchor\l|<center>center\l|<rotation>rotation\l|<width>width\l|<fixed>fixed\l|<opacity>opacity\l|<layer>layer\r" pos="1400,80" _anchor="{\"horizontalAlignment\":\"center\",\"verticalAlignment\":\"center\"}" _center="{\"x\":0.0,\"y\":0.0}" _rotation="0.0" _width="2.0" _fixed="\"horizontal\"" _opacity="1.0"];
-MakeFgLayer [type="vuo.layer.make.scaled" version="3.1.0" label="Make Fg Layer|<refresh>refresh\l|<image>image\l|<anchor>anchor\l|<center>center\l|<rotation>rotation\l|<width>width\l|<fixed>fixed\l|<opacity>opacity\l|<layer>layer\r" pos="1400,400" _anchor="{\"horizontalAlignment\":\"center\",\"verticalAlignment\":\"center\"}" _center="{\"x\":0.0,\"y\":0.0}" _rotation="0.0" _width="2.0" _fixed="\"horizontal\"" _opacity="1.0"];
-MakeList [type="vuo.list.make.2.VuoLayer" version="2.0.0" label="Make List|<refresh>refresh\l|<1>1\l|<2>2\l|<list>list\r" pos="1650,240"];
-RenderToImage [type="vuo.layer.render.image2" version="2.0.0" label="Render Layers to Image|<refresh>refresh\l|<layers>layers\l|<width>width\l|<height>height\l|<colorDepth>colorDepth\l|<multisampling>multisampling\l|<image>image\r" pos="1900,240" _width="1920" _height="1080" _colorDepth="\"8bpc\"" _multisampling="\"4\""];
-PublishedInputs [type="vuo.in" label="PublishedInputs|<Image>Image\r|<StillImageMode>StillImageMode\r|<Width>Width\r|<Height>Height\r|<BlurRadius>BlurRadius\r" _Image_type="VuoImage" _Image="null" _StillImageMode_type="VuoBoolean" _StillImageMode="false" _Width_type="VuoInteger" _Width="1920" _Width_suggestedMin="1" _Width_suggestedMax="4096" _Width_suggestedStep="256" _Height_type="VuoInteger" _Height="1080" _Height_suggestedMin="1" _Height_suggestedMax="4096" _Height_suggestedStep="256" _BlurRadius_type="VuoReal" _BlurRadius="30.000000" _BlurRadius_suggestedMin="0.000000" _BlurRadius_suggestedMax="200.000000" _BlurRadius_suggestedStep="1.000000"];
+PublishedInputs [type="vuo.in" label="PublishedInputs|<Image>Image\r|<StillImageMode>StillImageMode\r|<Width>Width\r|<Height>Height\r|<BlurRadius>BlurRadius\r" _Image_type="VuoImage" _StillImageMode_type="VuoBoolean" _StillImageMode="false" _Width_type="VuoInteger" _Width="1920" _Width_suggestedMin="1" _Width_suggestedMax="4096" _Width_suggestedStep="256" _Height_type="VuoInteger" _Height="1080" _Height_suggestedMin="1" _Height_suggestedMax="4096" _Height_suggestedStep="256" _BlurRadius_type="VuoReal" _BlurRadius="30.000000" _BlurRadius_suggestedMin="0.000000" _BlurRadius_suggestedMax="200.000000" _BlurRadius_suggestedStep="1.000000"];
 PublishedOutputs [type="vuo.out" label="PublishedOutputs|<OutputImage>OutputImage\l" _OutputImage_type="VuoImage"];
 
-PublishedInputs:Image -> SplitRGB:image;
-PublishedInputs:Image -> SelectImage:falseOption;
-PublishedInputs:StillImageMode -> ShareStillMode:value;
-PublishedInputs:Width -> ShareWidth:value;
-PublishedInputs:Height -> ShareHeight:value;
-PublishedInputs:BlurRadius -> ShareBlurRadius:value;
-
-SplitRGB:redImage -> CombineBGR:blueImage;
-SplitRGB:greenImage -> CombineBGR:greenImage;
-SplitRGB:blueImage -> CombineBGR:redImage;
-SplitRGB:opacityImage -> CombineBGR:opacityImage;
-CombineBGR:combinedImage -> SelectImage:trueOption;
-
-ShareStillMode:sameValue -> SelectImage:which;
-
-SelectImage:out -> ResizeFill:image;
-SelectImage:out -> ResizeFit:image;
-ShareWidth:sameValue -> ResizeFill:width;
-ShareWidth:sameValue -> ResizeFit:width;
-ShareWidth:sameValue -> RenderToImage:width;
-ShareHeight:sameValue -> ResizeFill:height;
-ShareHeight:sameValue -> ResizeFit:height;
-ShareHeight:sameValue -> RenderToImage:height;
-ShareBlurRadius:sameValue -> BlurImage:radius;
-
-ResizeFill:resizedImage -> BlurImage:image;
-ResizeFit:resizedImage -> MakeFgLayer:image;
 BlurImage:blurredImage -> MakeBgLayer:image;
+CombineBGR:combinedImage -> SelectImage:trueOption;
 MakeBgLayer:layer -> MakeList:1;
 MakeFgLayer:layer -> MakeList:2;
 MakeList:list -> RenderToImage:layers;
+PublishedInputs:BlurRadius -> ShareBlurRadius:value;
+PublishedInputs:Height -> ShareHeight:value;
+PublishedInputs:Image -> SelectImage:falseOption;
+PublishedInputs:Image -> SplitRGB:image;
+PublishedInputs:StillImageMode -> ShareStillMode:value;
+PublishedInputs:Width -> ShareWidth:value;
 RenderToImage:image -> PublishedOutputs:OutputImage;
+ResizeFill:resizedImage -> BlurImage:image;
+ResizeFit:resizedImage -> MakeFgLayer:image;
+SelectImage:out -> ResizeFill:image;
+SelectImage:out -> ResizeFit:image;
+ShareBlurRadius:sameValue -> BlurImage:radius;
+ShareHeight:sameValue -> RenderToImage:height;
+ShareHeight:sameValue -> ResizeFill:height;
+ShareHeight:sameValue -> ResizeFit:height;
+ShareStillMode:sameValue -> SelectImage:which;
+ShareWidth:sameValue -> RenderToImage:width;
+ShareWidth:sameValue -> ResizeFill:width;
+ShareWidth:sameValue -> ResizeFit:width;
+SplitRGB:blueImage -> CombineBGR:redImage;
+SplitRGB:greenImage -> CombineBGR:greenImage;
+SplitRGB:opacityImage -> CombineBGR:opacityImage;
+SplitRGB:redImage -> CombineBGR:blueImage;
 }
