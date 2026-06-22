@@ -167,6 +167,97 @@ def _detect_protocol(
     ]
 
 
+def _skip_string(text: str, i: int) -> int:
+    """``"`` から始まる文字列リテラルを読み飛ばす 終端 ``"`` の次の位置を返す"""
+    n = len(text)
+    i += 1
+    while i < n:
+        ch = text[i]
+        if ch == "\\" and i + 1 < n:
+            i += 2
+            continue
+        if ch == '"':
+            return i + 1
+        i += 1
+    return -1
+
+
+def _skip_comment(text: str, i: int) -> int:
+    """``//`` 行コメント or ``/* ... */`` ブロックコメントを読み飛ばす
+
+    コメント開始位置でない場合は ``i`` をそのまま返す
+    """
+    n = len(text)
+    if i + 1 >= n or text[i] != "/":
+        return i
+    nxt = text[i + 1]
+    if nxt == "/":
+        nl = text.find("\n", i + 2)
+        return n if nl == -1 else nl + 1
+    if nxt == "*":
+        end = text.find("*/", i + 2)
+        return -1 if end == -1 else end + 2
+    return i
+
+
+def _find_graph_body_end(text: str) -> int:
+    r"""最初の ``{`` に対応する閉じ ``}`` の位置を返す
+
+    文字列/コメント内のブレースは無視する
+    """
+    depth = 0
+    i = 0
+    n = len(text)
+    while i < n:
+        skipped = _skip_comment(text, i)
+        if skipped == -1:
+            return -1
+        if skipped != i:
+            i = skipped
+            continue
+        ch = text[i]
+        if ch == '"':
+            i = _skip_string(text, i)
+            if i == -1:
+                return -1
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return -1
+
+
+def _validate_parsed_graphs(
+    text: str, graphs: list[pydot.Dot] | None
+) -> pydot.Dot | None:
+    """パース結果に対する構造検証 (グラフ数 / 型 / trailing content)"""
+    if not graphs:
+        logger.error("[FAIL] pydot returned no graphs")
+        return None
+    if len(graphs) > 1:
+        logger.error(
+            "[FAIL] multiple top-level graphs found (%d); expected exactly 1",
+            len(graphs),
+        )
+        return None
+    graph = graphs[0]
+    if graph.get_type() != "digraph":
+        logger.error(
+            "[FAIL] expected directed graph (digraph) but got %r",
+            graph.get_type(),
+        )
+        return None
+    body_end = _find_graph_body_end(text)
+    if body_end == -1 or text[body_end + 1 :].strip():
+        logger.error("[FAIL] unexpected trailing content after DOT graph")
+        return None
+    return graph
+
+
 def _parse_dot(text: str) -> pydot.Dot | None:
     """DOT文字列をパースしてGraphを返す パース失敗時はNone"""
     try:
@@ -174,14 +265,7 @@ def _parse_dot(text: str) -> pydot.Dot | None:
     except Exception:
         logger.exception("[FAIL] DOT parse error")
         return None
-    if not graphs:
-        logger.error("[FAIL] pydot returned no graphs")
-        return None
-    last_brace = text.rfind("}")
-    if last_brace == -1 or text[last_brace + 1 :].strip():
-        logger.error("[FAIL] unexpected trailing content after DOT graph")
-        return None
-    return graphs[0]
+    return _validate_parsed_graphs(text, graphs)
 
 
 def validate(path: Path) -> int:
