@@ -5,15 +5,7 @@
 # ///
 """Vuoコンポジション(.vuo) DOTファイルの静的検証ツール
 
-検証範囲:
-  1. DOT構文(pydotでパース成功するか)
-  2. 参照整合性(エッジで言及されるノードが宣言済みか)
-  3. ポート整合性(エッジで参照されるポートIDがノードlabelで宣言されているか)
-  4. プロトコル準拠(Image Filter / Image Generator の必須ポート存在)
-
-検証範囲外:
-  - ノードID(`vuo.image.blur` 等)とバージョン番号が実在するか → Vuo本体が必要
-  - 型整合性(VuoImage→VuoRealへの接続など) → Vuo本体が必要
+ノードID/型整合性はVuo本体が必要なため検証対象外
 
 usage: uv run validate_vuo.py path/to/composition.vuo
 """
@@ -53,29 +45,12 @@ RESERVED_NODE_KEYS: Final[frozenset[str]] = frozenset({"node", "edge", "graph"})
 
 
 def parse_label_ports(label: str) -> set[str]:
-    r"""ノードlabel文字列からポートID集合を抽出する
-
-    label形式: ``DisplayName|<portId>portName\l|<otherId>otherName\r``
-
-    Args:
-        label: pydot Nodeのlabel属性値
-
-    Returns:
-        labelに含まれる ``<portId>`` マーカーの集合
-    """
+    r"""ノードlabel ``Display|<portId>portName\l|...`` からポートID集合を抽出する"""
     return set(re.findall(r"<([^>]+)>", label))
 
 
 def get_attr(obj: pydot.Common, key: str) -> str | None:
-    """pydotオブジェクトの属性値を取得し前後のダブルクォートを剥がす
-
-    Args:
-        obj: pydotオブジェクト(Node/Edge/Graph)
-        key: 属性名
-
-    Returns:
-        属性値の文字列、未設定ならNone
-    """
+    """pydot属性値を取得して前後のダブルクォートを剥がす"""
     val = obj.get(key)
     if val is None:
         return None
@@ -146,13 +121,7 @@ def _detect_protocol(
     pi: pydot.Node,
     po: pydot.Node,
 ) -> tuple[str | None, list[str]]:
-    """PublishedInputs/Outputsノードからプロトコルを検出する
-
-    VDMX Vuo Pluginはプロトコル制約がなく、出力ポートが1つ以上あれば検出する
-
-    Returns:
-        (検出されたプロトコル名 or None, エラーメッセージのリスト)
-    """
+    """プロトコルを検出する VDMX Vuo Pluginは出力ポート1つ以上で検出"""
     pi_ports = parse_label_ports(get_attr(pi, "label") or "")
     po_ports = parse_label_ports(get_attr(po, "label") or "")
 
@@ -199,14 +168,7 @@ def _parse_dot(text: str) -> pydot.Dot | None:
 
 
 def validate(path: Path) -> int:
-    """指定された.vuoファイルを検証する
-
-    Args:
-        path: .vuoファイルのパス
-
-    Returns:
-        終了コード(0=成功、1=失敗)
-    """
+    """.vuoファイルを検証する 0=成功 1=失敗"""
     try:
         text = path.read_text(encoding="utf-8")
     except OSError, UnicodeDecodeError:
