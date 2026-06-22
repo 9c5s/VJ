@@ -43,10 +43,8 @@ pre-commit:
 
     - name: ruff
       glob:
-        - 'scripts/*.{py,pyi}'
-        - 'scripts/**/*.{py,pyi}'
-        - 'Vuo/scripts/*.{py,pyi}'
-        - 'Vuo/scripts/**/*.{py,pyi}'
+        - '**/scripts/*.{py,pyi}'
+        - '**/scripts/**/*.{py,pyi}'
       run: >
         uvx ruff check --fix {staged_files} &&
         uvx ruff format {staged_files}
@@ -54,18 +52,14 @@ pre-commit:
 
     - name: pyright
       glob:
-        - 'scripts/*.py'
-        - 'scripts/**/*.py'
-        - 'Vuo/scripts/*.py'
-        - 'Vuo/scripts/**/*.py'
+        - '**/scripts/*.py'
+        - '**/scripts/**/*.py'
       run: uvx pyright {staged_files}
 
     - name: pytest
       glob:
-        - 'scripts/*.py'
-        - 'scripts/**/*.py'
-        - 'Vuo/scripts/*.py'
-        - 'Vuo/scripts/**/*.py'
+        - '**/scripts/*.py'
+        - '**/scripts/**/*.py'
       run: uv run pytest -q --cov
 
 post-merge:
