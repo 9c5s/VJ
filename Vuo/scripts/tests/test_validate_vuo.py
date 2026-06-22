@@ -26,7 +26,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-# 最小限の有効なVDMX Plugin形式
 VDMX_PLUGIN_DOT = (
     "digraph G {\n"
     'PublishedInputs [type="vuo.in" '
@@ -63,7 +62,6 @@ IMAGE_GENERATOR_DOT = (
     "}\n"
 )
 
-# PublishedOutputsにポートが無い(エラーになるケース)
 NO_OUTPUT_DOT = (
     "digraph G {\n"
     'PublishedInputs [type="vuo.in" '
