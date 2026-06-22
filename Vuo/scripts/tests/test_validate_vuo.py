@@ -379,6 +379,33 @@ class TestParseDot:
         result = _parse_dot("digraph G { A -> B; }\n\n   \n")
         assert result is not None
 
+    def test_rejects_trailing_brace_after_graph(self) -> None:
+        """グラフの後にブレースを含むコンフリクトマーカー残骸があっても検出する"""
+        result = _parse_dot("digraph G { A -> B; }\n<<<<<<< HEAD\n{ junk }")
+        assert result is None
+
+    def test_rejects_multiple_top_level_graphs(self) -> None:
+        """2つ以上の top-level graph を含む入力は拒否する"""
+        result = _parse_dot("digraph G { A; }\ndigraph H { B; }")
+        assert result is None
+
+    def test_rejects_undirected_graph(self) -> None:
+        """無向グラフ (``graph``) は Vuo composition でないため拒否する"""
+        result = _parse_dot("graph G { A -- B; }")
+        assert result is None
+
+    def test_accepts_block_comment_with_braces_in_string(self) -> None:
+        r"""ブロックコメント中の ``{`` ``}`` は brace counter で無視される"""
+        text = "/* { not a graph } */\ndigraph G { A -> B; }\n"
+        result = _parse_dot(text)
+        assert result is not None
+
+    def test_accepts_line_comment_with_braces(self) -> None:
+        r"""行コメント中の ``{`` ``}`` も brace counter で無視される"""
+        text = "// { not a graph }\ndigraph G { A -> B; }\n"
+        result = _parse_dot(text)
+        assert result is not None
+
     def test_returns_none_when_pydot_raises(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
