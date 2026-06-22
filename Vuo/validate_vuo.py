@@ -3,7 +3,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["pydot>=3.0"]
 # ///
-"""Vuoコンポジション(.vuo) DOTファイルの静的検証ツール.
+"""Vuoコンポジション(.vuo) DOTファイルの静的検証ツール
 
 検証範囲:
   1. DOT構文(pydotでパース成功するか)
@@ -20,13 +20,20 @@ usage: uv run validate_vuo.py path/to/composition.vuo
 
 from __future__ import annotations
 
+import logging
 import re
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING, Final
 
 import pydot
 
-PROTOCOL_REQUIREMENTS = {
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+logger = logging.getLogger(__name__)
+
+PROTOCOL_REQUIREMENTS: Final[Mapping[str, Mapping[str, list[tuple[str, str]]]]] = {
     "ImageFilter": {
         "PublishedInputs": [("image", "VuoImage"), ("time", "VuoReal")],
         "PublishedOutputs": [("outputImage", "VuoImage")],
@@ -41,72 +48,77 @@ PROTOCOL_REQUIREMENTS = {
     },
 }
 
-# VDMX Vuo Plugin: プロトコル制約なし。任意のpublished port構成可能。
-# 検出条件は「Image Filter/Generatorに当てはまらないが、出力ポートが1つ以上ある」。
+EXPECTED_ARGV_LEN: Final[int] = 2
+RESERVED_NODE_KEYS: Final[frozenset[str]] = frozenset({"node", "edge", "graph"})
 
 
 def parse_label_ports(label: str) -> set[str]:
-    """ノードlabel文字列からポートID集合を抽出する.
+    r"""ノードlabel文字列からポートID集合を抽出する
 
-    label形式: "DisplayName|<portId>portName\\l|<otherId>otherName\\r"
+    label形式: ``DisplayName|<portId>portName\l|<otherId>otherName\r``
+
+    Args:
+        label: pydot Nodeのlabel属性値
+
+    Returns:
+        labelに含まれる ``<portId>`` マーカーの集合
     """
     return set(re.findall(r"<([^>]+)>", label))
 
 
-def parse_published_ports(label: str) -> list[tuple[str, str]]:
-    """PublishedInputs/Outputsのlabelから (portId, direction) のリストを返す.
+def get_attr(obj: pydot.Common, key: str) -> str | None:
+    """pydotオブジェクトの属性値を取得し前後のダブルクォートを剥がす
 
-    direction: 'r' (出力ポート/Inputsの右端), 'l' (入力ポート/Outputsの左端)
+    Args:
+        obj: pydotオブジェクト(Node/Edge/Graph)
+        key: 属性名
+
+    Returns:
+        属性値の文字列、未設定ならNone
     """
-    pattern = re.compile(r"<([^>]+)>[^|]+?\\([lr])")
-    return [(pid, d) for pid, d in pattern.findall(label)]
-
-
-def get_attr(obj, key: str) -> str | None:
-    """pydotの属性取得.値の前後ダブルクォートを剥がす."""
     val = obj.get(key)
     if val is None:
         return None
     s = str(val)
     if s.startswith('"') and s.endswith('"') and len(s) >= 2:
-        s = s[1:-1]
+        return s[1:-1]
     return s
 
 
-def validate(path: Path) -> int:
-    text = path.read_text(encoding="utf-8")
-    print(f"== Validating: {path} ({len(text)} bytes)")
+def _extract_nodes(graph: pydot.Dot) -> dict[str, pydot.Node]:
+    """グラフから予約名以外のノードを名前→オブジェクトの辞書として返す"""
+    return {
+        n.get_name().strip('"'): n
+        for n in graph.get_nodes()
+        if n.get_name() not in RESERVED_NODE_KEYS
+    }
 
-    try:
-        graphs = pydot.graph_from_dot_data(text)
-    except Exception as e:
-        print(f"[FAIL] DOT parse error: {e}")
-        return 1
-    if not graphs:
-        print("[FAIL] pydot returned no graphs")
-        return 1
-    g = graphs[0]
-    print(f"[OK]   DOT syntax parsed; graph name={g.get_name()!r}")
 
-    nodes = {n.get_name().strip('"'): n for n in g.get_nodes() if n.get_name() not in {"node", "edge", "graph"}}
-    edges = g.get_edges()
-    print(f"       nodes={len(nodes)}, edges={len(edges)}")
-
-    errors: list[str] = []
-    warnings: list[str] = []
-
-    # --- ノード一覧と各ノードのポートID集合 ---
+def _build_node_ports(
+    nodes: dict[str, pydot.Node],
+) -> tuple[dict[str, set[str]], list[str]]:
+    """各ノードのlabelからポートID集合を構築し警告を集約する"""
     node_ports: dict[str, set[str]] = {}
+    warnings: list[str] = []
     for name, n in nodes.items():
         label = get_attr(n, "label") or ""
         node_ports[name] = parse_label_ports(label)
         if not node_ports[name]:
-            warnings.append(f"node {name!r}: label has no <portId> markers ({label[:60]!r}...)")
+            warnings.append(
+                f"node {name!r}: label has no <portId> markers ({label[:60]!r}...)"
+            )
+    return node_ports, warnings
 
-    # --- エッジが参照するノード/ポートを検証 ---
+
+def _validate_edges(
+    edges: list[pydot.Edge],
+    node_ports: dict[str, set[str]],
+) -> list[str]:
+    """エッジの参照ノード/ポートが宣言済みかを検証する"""
+    errors: list[str] = []
     for e in edges:
-        src_full = e.get_source().strip('"')
-        dst_full = e.get_destination().strip('"')
+        src_full = str(e.get_source()).strip('"')
+        dst_full = str(e.get_destination()).strip('"')
         for end, full in (("source", src_full), ("dest", dst_full)):
             if ":" not in full:
                 errors.append(f"edge {end} {full!r} has no port (expected Node:port)")
@@ -120,55 +132,127 @@ def validate(path: Path) -> int:
                     f"edge {end} {node_name}:{port!r} - port not in node label "
                     f"(declared: {sorted(node_ports[node_name])})"
                 )
+    return errors
 
-    # --- プロトコル準拠 ---
-    detected_protocol = None
+
+def _has_typed(node: pydot.Node, port: str, vtype: str) -> bool:
+    """ノードの ``_{port}_type`` 属性が期待型と一致するか判定する"""
+    return get_attr(node, f"_{port}_type") == vtype
+
+
+def _detect_protocol(
+    pi: pydot.Node,
+    po: pydot.Node,
+) -> tuple[str | None, list[str]]:
+    """PublishedInputs/Outputsノードからプロトコルを検出する
+
+    VDMX Vuo Pluginはプロトコル制約がなく、出力ポートが1つ以上あれば検出する
+
+    Returns:
+        (検出されたプロトコル名 or None, エラーメッセージのリスト)
+    """
+    pi_ports = parse_label_ports(get_attr(pi, "label") or "")
+    po_ports = parse_label_ports(get_attr(po, "label") or "")
+
+    for proto, req in PROTOCOL_REQUIREMENTS.items():
+        in_ok = all(
+            p in pi_ports and _has_typed(pi, p, t) for p, t in req["PublishedInputs"]
+        )
+        out_ok = all(
+            p in po_ports and _has_typed(po, p, t) for p, t in req["PublishedOutputs"]
+        )
+        if in_ok and out_ok:
+            logger.info("[OK]   Protocol detected: %s", proto)
+            return proto, []
+
+    if po_ports:
+        logger.info(
+            "[OK]   Protocol: VDMX Plugin (free-form, %d output(s))",
+            len(po_ports),
+        )
+        return "VDMXPlugin", []
+
+    return None, [
+        "No protocol matched and no PublishedOutputs. "
+        "Required: Image Filter / Image Generator / "
+        "or at least one published output for plugin"
+    ]
+
+
+def _parse_dot(text: str) -> pydot.Dot | None:
+    """DOT文字列をパースしてGraphを返す パース失敗時はNone"""
+    try:
+        graphs = pydot.graph_from_dot_data(text)
+    except Exception:
+        logger.exception("[FAIL] DOT parse error")
+        return None
+    if not graphs:
+        logger.error("[FAIL] pydot returned no graphs")
+        return None
+    return graphs[0]
+
+
+def validate(path: Path) -> int:
+    """指定された.vuoファイルを検証する
+
+    Args:
+        path: .vuoファイルのパス
+
+    Returns:
+        終了コード(0=成功、1=失敗)
+    """
+    text = path.read_text(encoding="utf-8")
+    logger.info("== Validating: %s (%d bytes)", path, len(text))
+
+    g = _parse_dot(text)
+    if g is None:
+        return 1
+    logger.info("[OK]   DOT syntax parsed; graph name=%r", g.get_name())
+
+    nodes = _extract_nodes(g)
+    edges: list[pydot.Edge] = list(g.get_edges())
+    logger.info("       nodes=%d, edges=%d", len(nodes), len(edges))
+
+    node_ports, warnings = _build_node_ports(nodes)
+    errors = _validate_edges(edges, node_ports)
+
     pi = nodes.get("PublishedInputs")
     po = nodes.get("PublishedOutputs")
     if pi is None or po is None:
         errors.append("PublishedInputs and/or PublishedOutputs node missing")
     else:
-        pi_ports = parse_label_ports(get_attr(pi, "label") or "")
-        po_ports = parse_label_ports(get_attr(po, "label") or "")
+        _, proto_errors = _detect_protocol(pi, po)
+        errors.extend(proto_errors)
 
-        def has_typed(node, port, vtype):
-            return get_attr(node, f"_{port}_type") == vtype
-
-        for proto, req in PROTOCOL_REQUIREMENTS.items():
-            in_ok = all(p in pi_ports and has_typed(pi, p, t) for p, t in req["PublishedInputs"])
-            out_ok = all(p in po_ports and has_typed(po, p, t) for p, t in req["PublishedOutputs"])
-            if in_ok and out_ok:
-                detected_protocol = proto
-                break
-
-        if detected_protocol:
-            print(f"[OK]   Protocol detected: {detected_protocol}")
-        elif po_ports:
-            # VDMX Vuo Plugin: プロトコル不要、自由port構成
-            detected_protocol = "VDMXPlugin"
-            print(f"[OK]   Protocol: VDMX Plugin (free-form, {len(po_ports)} output(s))")
-        else:
-            errors.append(
-                "No protocol matched and no PublishedOutputs. Required: "
-                "Image Filter / Image Generator / or at least one published output for plugin"
-            )
-
-    # --- 結果 ---
     for w in warnings:
-        print(f"[WARN] {w}")
-    for e in errors:
-        print(f"[FAIL] {e}")
+        logger.warning("[WARN] %s", w)
+    for err in errors:
+        logger.error("[FAIL] %s", err)
 
     if errors:
-        print(f"\n== FAILED: {len(errors)} error(s), {len(warnings)} warning(s)")
+        logger.error(
+            "== FAILED: %d error(s), %d warning(s)", len(errors), len(warnings)
+        )
         return 1
-    print(f"\n== PASSED: {len(warnings)} warning(s)")
+    logger.info("== PASSED: %d warning(s)", len(warnings))
     return 0
 
 
+def setup_logger() -> None:
+    """モジュールロガーにstdoutへのStreamHandlerを設定する"""
+    if logger.handlers:
+        return
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        print("usage: validate_vuo.py path/to/composition.vuo", file=sys.stderr)
+    """CLIエントリポイント"""
+    setup_logger()
+    if len(argv) != EXPECTED_ARGV_LEN:
+        logger.error("usage: validate_vuo.py path/to/composition.vuo")
         return 2
     return validate(Path(argv[1]))
 
