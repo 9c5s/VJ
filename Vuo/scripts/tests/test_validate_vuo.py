@@ -74,24 +74,35 @@ MISSING_PUBLISHED_DOT = 'digraph G {\nNode1 [label="N1|<in>in\\l|<out>out\\r"];\
 
 
 class TestParseLabelPorts:
-    """parse_label_ports: label文字列からポートID集合を抽出"""
+    """parse_label_ports: label文字列から port_id -> 方向 マップを抽出"""
 
-    def test_empty_label_returns_empty_set(self) -> None:
-        """空文字列を渡すと空のsetを返す"""
-        assert parse_label_ports("") == set()
+    def test_empty_label_returns_empty_dict(self) -> None:
+        """空文字列を渡すと空dictを返す"""
+        assert parse_label_ports("") == {}
 
-    def test_single_port_marker(self) -> None:
-        """単一の<port>マーカーを含むlabelから1要素のsetを返す"""
-        assert parse_label_ports("Display|<image>image\\l") == {"image"}
+    def test_single_left_port_marker(self) -> None:
+        r"""``\l`` ポートは direction 'l'"""
+        assert parse_label_ports("Display|<image>image\\l") == {"image": "l"}
 
-    def test_multiple_port_markers(self) -> None:
-        """複数の<port>マーカーから全要素のsetを返す"""
-        result = parse_label_ports("N|<a>a\\l|<b>b\\r|<c>c\\l")
-        assert result == {"a", "b", "c"}
+    def test_single_right_port_marker(self) -> None:
+        r"""``\r`` ポートは direction 'r'"""
+        assert parse_label_ports("Display|<out>out\\r") == {"out": "r"}
+
+    def test_multiple_port_markers_with_directions(self) -> None:
+        """複数の<port>マーカーから各方向を抽出する"""
+        assert parse_label_ports("N|<a>a\\l|<b>b\\r|<c>c\\l") == {
+            "a": "l",
+            "b": "r",
+            "c": "l",
+        }
 
     def test_label_without_markers_returns_empty(self) -> None:
-        """マーカーが無いlabelは空setを返す"""
-        assert parse_label_ports("DisplayName") == set()
+        """マーカーが無いlabelは空dictを返す"""
+        assert parse_label_ports("DisplayName") == {}
+
+    def test_marker_without_direction_is_ignored(self) -> None:
+        r"""``\l`` ``\r`` が付かないマーカーは捨てる"""
+        assert parse_label_ports("X|<lonely>lonely") == {}
 
 
 class TestGetAttr:
@@ -156,7 +167,7 @@ class TestExtractNodes:
 
 
 class TestBuildNodePorts:
-    """_build_node_ports: 各ノードのポートID集合と警告を構築"""
+    """_build_node_ports: 各ノードの port_id -> 方向 マップと警告を構築"""
 
     def test_all_nodes_with_ports_no_warnings(self) -> None:
         """全ノードがポートを持つ場合は警告無し"""
@@ -165,37 +176,37 @@ class TestBuildNodePorts:
             "B": pydot.Node("B", label='"N|<x>x\\l"'),
         }
         ports, warnings = _build_node_ports(nodes)
-        assert ports == {"A": {"p1", "p2"}, "B": {"x"}}
+        assert ports == {"A": {"p1": "l", "p2": "r"}, "B": {"x": "l"}}
         assert warnings == []
 
     def test_node_without_label_generates_warning(self) -> None:
-        """labelが無いノードは警告を生成しポート集合は空"""
+        """labelが無いノードは警告を生成しポート dict は空"""
         nodes = {"A": pydot.Node("A")}
         ports, warnings = _build_node_ports(nodes)
-        assert ports == {"A": set()}
+        assert ports == {"A": {}}
         assert warnings == ["node 'A': label has no <portId> markers (''...)"]
 
     def test_node_with_label_but_no_markers_generates_warning(self) -> None:
         """labelはあるがポートマーカーが無いノードも警告"""
         nodes = {"A": pydot.Node("A", label='"PlainLabel"')}
         ports, warnings = _build_node_ports(nodes)
-        assert ports == {"A": set()}
+        assert ports == {"A": {}}
         assert warnings == ["node 'A': label has no <portId> markers ('PlainLabel'...)"]
 
 
 class TestValidateEdges:
-    """_validate_edges: エッジが参照するノード/ポートを検証"""
+    """_validate_edges: エッジが参照するノード/ポート/向きを検証"""
 
     def test_valid_edges_no_errors(self) -> None:
-        """有効なエッジはエラーを生成しない"""
+        r"""``\r`` ソース -> ``\l`` デストの正方向ケーブルはエラーなし"""
         edges = [pydot.Edge("A:out", "B:in")]
-        node_ports = {"A": {"out"}, "B": {"in"}}
+        node_ports = {"A": {"out": "r"}, "B": {"in": "l"}}
         assert _validate_edges(edges, node_ports) == []
 
     def test_edge_without_port_in_source(self) -> None:
         """sourceにポート指定が無いとエラー"""
         edges = [pydot.Edge("A", "B:in")]
-        node_ports = {"A": {"out"}, "B": {"in"}}
+        node_ports = {"A": {"out": "r"}, "B": {"in": "l"}}
         assert _validate_edges(edges, node_ports) == [
             "edge source 'A' has no port (expected Node:port)",
         ]
@@ -203,7 +214,7 @@ class TestValidateEdges:
     def test_edge_with_unknown_source_node(self) -> None:
         """未宣言のノードを参照するエッジはエラー"""
         edges = [pydot.Edge("Unknown:out", "B:in")]
-        node_ports = {"B": {"in"}}
+        node_ports = {"B": {"in": "l"}}
         assert _validate_edges(edges, node_ports) == [
             "edge source references unknown node 'Unknown'",
         ]
@@ -211,7 +222,7 @@ class TestValidateEdges:
     def test_edge_with_port_not_in_node_label(self) -> None:
         """ノードのlabelに無いポートを参照するエッジはエラー"""
         edges = [pydot.Edge("A:nonexistent", "B:in")]
-        node_ports = {"A": {"out"}, "B": {"in"}}
+        node_ports = {"A": {"out": "r"}, "B": {"in": "l"}}
         assert _validate_edges(edges, node_ports) == [
             "edge source A:'nonexistent' - port not in node label (declared: ['out'])",
         ]
@@ -219,10 +230,35 @@ class TestValidateEdges:
     def test_multiple_errors_in_one_edge(self) -> None:
         """sourceとdestの両方に問題があれば両方エラー"""
         edges = [pydot.Edge("A", "B")]
-        node_ports = {"A": {"out"}, "B": {"in"}}
+        node_ports = {"A": {"out": "r"}, "B": {"in": "l"}}
         assert _validate_edges(edges, node_ports) == [
             "edge source 'A' has no port (expected Node:port)",
             "edge dest 'B' has no port (expected Node:port)",
+        ]
+
+    def test_reversed_cable_is_rejected(self) -> None:
+        r"""``\l`` ソースは出力でないため拒否(逆向きケーブル検出)"""
+        edges = [pydot.Edge("A:in", "B:out")]
+        node_ports = {"A": {"in": "l", "out": "r"}, "B": {"in": "l", "out": "r"}}
+        assert _validate_edges(edges, node_ports) == [
+            "edge source A:'in' - expected '\\r' port but found '\\l'",
+            "edge dest B:'out' - expected '\\l' port but found '\\r'",
+        ]
+
+    def test_source_using_input_port_is_rejected(self) -> None:
+        r"""Source が ``\l``(入力)ポートのみエラー"""
+        edges = [pydot.Edge("A:in", "B:in")]
+        node_ports = {"A": {"in": "l"}, "B": {"in": "l"}}
+        assert _validate_edges(edges, node_ports) == [
+            "edge source A:'in' - expected '\\r' port but found '\\l'",
+        ]
+
+    def test_dest_using_output_port_is_rejected(self) -> None:
+        r"""Dest が ``\r``(出力)ポートのみエラー"""
+        edges = [pydot.Edge("A:out", "B:out")]
+        node_ports = {"A": {"out": "r"}, "B": {"out": "r"}}
+        assert _validate_edges(edges, node_ports) == [
+            "edge dest B:'out' - expected '\\l' port but found '\\r'",
         ]
 
 
